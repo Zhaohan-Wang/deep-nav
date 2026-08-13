@@ -29,6 +29,7 @@ const PROXIMITY_ENTER: float = 0.28
 const PROXIMITY_EXIT: float = 0.10
 
 var porthole_host: Control
+var stick_host: Control
 var _dashboard: PilotDashboard
 var _alert: Label
 var _alert_icon: TextureRect
@@ -41,6 +42,7 @@ var _proximity_on: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip_contents = true
 	_build()
 	Game.ship_state_changed.connect(_on_ship_state)
 	Game.hull_changed.connect(_on_hull)
@@ -69,7 +71,15 @@ func _build() -> void:
 	stages.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	stages.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(stages)
-	stages.setup(porthole_host, _dashboard, _make_banner())
+	stages.setup(porthole_host, _dashboard, _make_banner(), UiStyle.make_view_overlay(UiStyle.PILOT_VIEW_PATH))
+	add_child(UiStyle.make_role_badge(UiStyle.PILOT_BADGE_PATH))
+
+	# 3D 摇杆单独一层，压在 Pad View / 仪表 / 徽章上面，白屏遮罩仍在其上。
+	stick_host = Control.new()
+	stick_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stick_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	stick_host.z_index = 32
+	add_child(stick_host)
 
 
 ## 仪表台上方的状态条：不透明圆角矩形，告警文本（左）、航点距离（中右）、船体读数（右）。

@@ -19,6 +19,14 @@ const FRAME_PATH: String = "res://assets/ui/frames/btn_frame.png"
 const BAR_TRACK_PATH: String = "res://assets/ui/bars/bar_track.png"
 const BAR_FILL_PATH: String = "res://assets/ui/bars/bar_fill.png"
 const ICON_DIR: String = "res://assets/ui/icons/"
+const NAVIGATOR_BADGE_PATH: String = "res://assets/ui/roles/navigator-icon.png"
+const PILOT_BADGE_PATH: String = "res://assets/ui/roles/pilot-icon.png"
+const NAV_VIEW_PATH: String = "res://assets/ui/views/nav-view.png"
+const NAV_HAND_PATH: String = "res://assets/ui/views/nav-hand.png"
+const PILOT_VIEW_PATH: String = "res://assets/ui/views/pilot-view.png"
+## 左右分屏角色徽章共用高度与边距，宽按贴图比例算出。
+const ROLE_BADGE_HEIGHT: float = 96.0
+const ROLE_BADGE_MARGIN := Vector2(12.0, 12.0)
 
 static var _hud_font: Font = null
 static var _icon_cache: Dictionary[String, Texture2D] = {}
@@ -80,6 +88,39 @@ static func make_icon(icon_name: String, color: Color, px: float = 16.0) -> Text
 	icon.custom_minimum_size = Vector2(px, px)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return icon
+
+
+## 分屏左上角的角色徽章：领航员 / 驾驶员共用同一套尺寸和边距。
+static func make_role_badge(texture_path: String) -> TextureRect:
+	var badge := TextureRect.new()
+	badge.texture = load(texture_path) as Texture2D
+	badge.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var height: float = ROLE_BADGE_HEIGHT
+	var width: float = height
+	if badge.texture != null:
+		var tex_size: Vector2 = badge.texture.get_size()
+		if tex_size.y > 0.0:
+			width = roundf(height * tex_size.x / tex_size.y)
+	badge.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	badge.offset_left = ROLE_BADGE_MARGIN.x
+	badge.offset_top = ROLE_BADGE_MARGIN.y
+	badge.offset_right = ROLE_BADGE_MARGIN.x + width
+	badge.offset_bottom = ROLE_BADGE_MARGIN.y + height
+	return badge
+
+
+## 铺满 16:9 分屏的舱内画面：叠在三维上面、所有 UI 下面。
+static func make_view_overlay(texture_path: String) -> TextureRect:
+	var view := TextureRect.new()
+	view.texture = load(texture_path) as Texture2D
+	view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	view.stretch_mode = TextureRect.STRETCH_SCALE
+	view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return view
 
 
 static func icon_texture(icon_name: String) -> Texture2D:
@@ -225,8 +266,10 @@ static func make_wide_page_frame(page: Control) -> Control:
 	frame.alignment_vertical = AspectRatioContainer.ALIGNMENT_CENTER
 	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.clip_contents = true
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	page.clip_contents = true
 	if page.get_parent() != null:
 		page.get_parent().remove_child(page)
 	frame.add_child(page)

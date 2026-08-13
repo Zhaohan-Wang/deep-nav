@@ -48,7 +48,12 @@ void fragment() {
 	vec2 screen_px = UV / texel;
 	vec2 snapped = (floor(screen_px / pixel_scale) + 0.5) * pixel_scale;
 	vec2 uv = snapped * texel;
-	vec3 col = texture(TEXTURE, uv).rgb;
+	vec4 src = texture(TEXTURE, uv);
+	if (src.a < 0.01) {
+		COLOR = vec4(0.0);
+		return;
+	}
+	vec3 col = src.rgb;
 
 	float luma = dot(col, vec3(0.299, 0.587, 0.114));
 	col = mix(vec3(luma), col, saturation);
@@ -71,5 +76,5 @@ void fragment() {
 	// 解体白屏：1.0 时纯白盖满，什么都看不见（曲线由脚本驱动）。
 	col = mix(col, vec3(1.0), clamp(death_flash, 0.0, 1.0));
 
-	COLOR = vec4(col, 1.0);
+	COLOR = vec4(col, src.a);
 }

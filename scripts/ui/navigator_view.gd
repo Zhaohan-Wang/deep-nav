@@ -6,10 +6,12 @@ var view_host: Control
 var _map: SectorMap
 var _status: Label
 var _help: Label
+var _stages: DualStageColumn
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip_contents = true
 	_build()
 	Game.ship_state_changed.connect(_on_ship_state)
 	Game.waypoint_changed.connect(_on_waypoint)
@@ -57,14 +59,31 @@ func _build() -> void:
 	banner_col.add_child(help_row)
 
 	var stages := DualStageColumn.new()
+	_stages = stages
 	# 小地图整体放大一档。
 	stages.monitor_width_ratio = 0.47
 	stages.monitor_max_width = 540.0
 	stages.monitor_min_width = 320.0
+	# 状态条和小屏一起略微后仰，垫在控制台上。
+	stages.hud_pitch = 0.88
+	stages.hud_top_scale = 0.90
 	stages.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	stages.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(stages)
-	stages.setup(view_host, monitor, banner)
+	stages.setup(
+		view_host,
+		monitor,
+		banner,
+		UiStyle.make_view_overlay(UiStyle.NAV_VIEW_PATH),
+		UiStyle.make_view_overlay(UiStyle.NAV_HAND_PATH)
+	)
+	add_child(UiStyle.make_role_badge(UiStyle.NAVIGATOR_BADGE_PATH))
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("toggle_nav_deck") and _stages != null:
+		_stages.toggle_deck()
+		get_viewport().set_input_as_handled()
 
 
 func _on_map_waypoint(world_pos: Vector3) -> void:

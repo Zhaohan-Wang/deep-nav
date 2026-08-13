@@ -3,6 +3,8 @@ extends Node
 
 const VIEW_SIZE := Vector2i(640, 360)
 const VIEW_FOV: float = 64.0
+## 驾驶员比领航员更窄，窗口里放大一点，少看到全景。
+const PILOT_FOV: float = 50.0
 const VIEW_NEAR: float = 0.12
 const VIEW_FAR: float = 3600.0
 const NAV_ARM_BACK: float = 16.0
@@ -16,7 +18,7 @@ const PILOT_FOCUS_AHEAD: float = 26.0
 const NAV_ARM_FOLLOW: float = 7.2
 ## 离致死行星表面小于此距离时开始接近警告。
 const PROXIMITY_WARN_DISTANCE: float = 14.0
-## 解体白屏关键帧（时间秒 → 白度）：闪两下 → 短停纯白 → 快淡出。
+## 解体白屏关键帧（时间秒 → 白度）：闪两下 → 停纯白 → 快淡出。
 const DEATH_CURVE: Array[Vector2] = [
 	Vector2(0.00, 0.0),
 	Vector2(0.07, 0.85),
@@ -24,8 +26,8 @@ const DEATH_CURVE: Array[Vector2] = [
 	Vector2(0.25, 0.92),
 	Vector2(0.34, 0.10),
 	Vector2(0.50, 1.0),
-	Vector2(0.68, 1.0),
-	Vector2(0.88, 0.0),
+	Vector2(1.00, 1.0),
+	Vector2(1.20, 0.0),
 ]
 ## 纯白保持期间把船传回出生点（玩家看不到瞬移）。
 const DEATH_RESET_TIME: float = 0.58
@@ -120,6 +122,7 @@ func _bind_inputs() -> void:
 	_bind_key("cycle_view", KEY_F2)
 	_bind_key("dual_window", KEY_F3)
 	_bind_key("reset_run", KEY_R)
+	_bind_key("toggle_nav_deck", KEY_E)
 
 
 func _bind_key(action: String, key: Key) -> void:
@@ -213,13 +216,36 @@ func _build_world_and_cameras() -> void:
 	_pilot_viewport.own_world_3d = false
 	pilot_box.add_child(_pilot_viewport)
 	_pilot_camera = _make_camera()
+	_pilot_camera.fov = PILOT_FOV
 	_pilot_viewport.add_child(_pilot_camera)
 	_pilot_fog_mat = _attach_depth_fog(_pilot_camera)
 	_pilot_camera.make_current()
 	_pilot_camera.global_transform = _ship.pilot_mount.global_transform
-	# 驾驶舱摇杆挂在驾驶员相机下，领航员相机剔除舱内渲染层。
-	_pilot_camera.add_child(CockpitStick3D.new())
+	# 摇杆改画在驾驶员页最上层的透明视口里，主相机不再渲染舱内层。
+	_pilot_camera.cull_mask &= ~CockpitStick3D.RENDER_LAYER
 	_nav_camera.cull_mask &= ~CockpitStick3D.RENDER_LAYER
+	_build_pilot_stick_overlay()
+
+
+func _build_pilot_stick_overlay() -> void:
+	# 独立透明视口：摇杆贴在屏幕上，压过 Pad View 和仪表。
+	var stick_box := _make_view_box(2.0)
+	_pilot_view.stick_host.add_child(stick_box)
+	var stick_viewport := _make_viewport(VIEW_SIZE)
+	stick_viewport.transparent_bg = true
+	stick_viewport.own_world_3d = true
+	stick_box.add_child(stick_viewport)
+	var stick_camera := _make_camera()
+	# 摇杆坐标按原来的 64° 视野标定；窗外镜头的 50° 不能套在这一层，否则杆会沉到画面外。
+	stick_camera.fov = VIEW_FOV
+	stick_camera.cull_mask = CockpitStick3D.RENDER_LAYER
+	var env := Environment.new()
+	env.background_mode = Environment.BG_CLEAR_COLOR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	stick_camera.environment = env
+	stick_viewport.add_child(stick_camera)
+	stick_camera.make_current()
+	stick_camera.add_child(CockpitStick3D.new())
 
 
 func _make_view_box(pixel_scale: float) -> SubViewportContainer:
