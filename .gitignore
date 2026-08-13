@@ -1,0 +1,12 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# 本地临时截图 / 探针输出，不进仓库
+.tmp_shots/
+tmp_movie/
+input_probe_tmp.gd
+input_probe_tmp.gd.uid
+
+.DS_Store
+**/.DS_Store
