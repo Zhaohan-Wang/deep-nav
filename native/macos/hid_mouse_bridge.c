@@ -28,6 +28,7 @@ typedef struct {
     IOHIDDeviceRef device;
     int slot;
     DeviceKind kind;
+    bool built_in;
     uint64_t registry_id;
     char product[160];
 } HIDDevice;
@@ -103,6 +104,13 @@ static int next_role_slot(Bridge *bridge, DeviceKind kind) {
     return -1;
 }
 
+static bool role_slot_in_use(Bridge *bridge, DeviceKind kind, int slot) {
+    for (int i = 0; i < MAX_TRACKED_DEVICES; i++) {
+        if (bridge->devices[i].device && bridge->devices[i].kind == kind && bridge->devices[i].slot == slot) return true;
+    }
+    return false;
+}
+
 static void device_added(void *context, IOReturn result, void *sender, IOHIDDeviceRef device) {
     (void)result;
     (void)sender;
@@ -121,18 +129,22 @@ static void device_added(void *context, IOReturn result, void *sender, IOHIDDevi
     }
     if (index < 0) return;
     HIDDevice *entry = &bridge->devices[index];
+    int role_slot = kind == DEVICE_KEYBOARD ? (built_in ? 0 : 1) : next_role_slot(bridge, kind);
+    if (role_slot < 0 || role_slot_in_use(bridge, kind, role_slot)) return;
     entry->device = device;
     entry->kind = kind;
-    entry->slot = next_role_slot(bridge, kind);
+    entry->built_in = built_in;
+    entry->slot = role_slot;
     entry->registry_id = device_registry_id(device);
     cf_string_property(device, CFSTR(kIOHIDProductKey), entry->product, sizeof(entry->product));
-    if (entry->product[0] == '\0') snprintf(entry->product, sizeof(entry->product), "HID Mouse");
+    if (entry->product[0] == '\0') snprintf(entry->product, sizeof(entry->product), kind == DEVICE_MOUSE ? "HID Mouse" : "HID Keyboard");
     char escaped[320];
     char message[640];
     json_escape(entry->product, escaped, sizeof(escaped));
     snprintf(message, sizeof(message),
-             "{\"type\":\"device\",\"kind\":\"%s\",\"connected\":true,\"slot\":%d,\"id\":%llu,\"product\":\"%s\"}",
-             kind == DEVICE_MOUSE ? "mouse" : "keyboard", entry->slot, (unsigned long long)entry->registry_id, escaped);
+             "{\"type\":\"device\",\"kind\":\"%s\",\"connected\":true,\"slot\":%d,\"built_in\":%s,\"id\":%llu,\"product\":\"%s\"}",
+             kind == DEVICE_MOUSE ? "mouse" : "keyboard", entry->slot, entry->built_in ? "true" : "false",
+             (unsigned long long)entry->registry_id, escaped);
     send_message(bridge, message);
 }
 
@@ -147,8 +159,9 @@ static void device_removed(void *context, IOReturn result, void *sender, IOHIDDe
     char message[640];
     json_escape(entry->product, escaped, sizeof(escaped));
     snprintf(message, sizeof(message),
-             "{\"type\":\"device\",\"kind\":\"%s\",\"connected\":false,\"slot\":%d,\"id\":%llu,\"product\":\"%s\"}",
-             entry->kind == DEVICE_MOUSE ? "mouse" : "keyboard", entry->slot, (unsigned long long)entry->registry_id, escaped);
+             "{\"type\":\"device\",\"kind\":\"%s\",\"connected\":false,\"slot\":%d,\"built_in\":%s,\"id\":%llu,\"product\":\"%s\"}",
+             entry->kind == DEVICE_MOUSE ? "mouse" : "keyboard", entry->slot, entry->built_in ? "true" : "false",
+             (unsigned long long)entry->registry_id, escaped);
     send_message(bridge, message);
     memset(entry, 0, sizeof(*entry));
     entry->slot = -1;

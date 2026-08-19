@@ -7,7 +7,7 @@ OUTPUT_DIR="$PROJECT_ROOT/native/macos/bin"
 OUTPUT="$OUTPUT_DIR/deepnav-hid-mouse-bridge"
 
 mkdir -p "$OUTPUT_DIR"
-clang -std=c11 -O2 -Wall -Wextra \
+clang -std=c11 -O2 -Wall -Wextra -arch arm64 -arch x86_64 \
 	"$SOURCE" \
 	-framework IOKit \
 	-framework CoreFoundation \

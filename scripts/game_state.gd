@@ -14,6 +14,7 @@ signal ship_exploded(world_pos: Vector3)
 signal view_mode_changed(mode: int)
 signal settings_changed
 signal disturbance_gate_crossed(index: int,slot: String,anchor: Vector3)
+signal disturbance_effect_applied(effect: String,payload: Dictionary)
 signal safe_gate_crossed(index: int,anchor: Vector3)
 signal relay_station_reached(index: int,position: Vector3,station_name: String)
 
@@ -43,6 +44,9 @@ var hull: float = MAX_HULL
 var boundary_proximity: float = 0.0
 var waypoint: Vector3 = Vector3.ZERO
 var has_waypoint: bool = false
+var waypoint_request_sequence: int = 0
+var last_waypoint_requested: Vector3 = Vector3.ZERO
+var last_waypoint_applied: Vector3 = Vector3.ZERO
 var view_mode: int = ViewMode.SPLIT
 var mission_complete: bool = false
 var ship_alive: bool = true
@@ -59,9 +63,18 @@ var waypoint_cooldown_s: float = 2.0
 var waypoint_max_distance: float = 72.0
 const WAYPOINT_READY_NOTICE_S: float = 2.0
 const SETTINGS_PATH := "user://settings.cfg"
+const EXPERIMENT_PROTOCOL_VERSION := "attribution-1.0"
+var dyad_sequence: int = 0
+var dyad_id: String = ""
+var participant_a: String = ""
+var participant_b: String = ""
+var participant_a_seat: int = 0
+var attribution_condition: String = ""
+var experiment_setup_locked: bool = false
 var _last_waypoint_msec: int = -1
 var _triggered_disturbances: Dictionary = {}
 var _triggered_safe_gates: Dictionary = {}
+var _pending_waypoint_drift_deg: float = 0.0
 var _reached_relays: Dictionary = {}
 var last_relay_index: int = -1
 
@@ -95,6 +108,44 @@ func begin_mission_sequence() -> void:
 	session_mission_index = 0
 	session_mission_results.clear()
 	select_mission(Catalog.IDS[0])
+
+
+## 组号同时完成两个平衡：奇偶分配“明确/模糊”，每四组翻转一次 A/B 屏幕侧别。
+## 这样实验条件不会与固定主屏/副屏绑定。
+func lock_experiment_setup(sequence: int) -> bool:
+	if sequence <= 0:
+		return false
+	dyad_sequence = sequence
+	dyad_id = "D%03d" % sequence
+	participant_a = "%sA" % dyad_id
+	participant_b = "%sB" % dyad_id
+	attribution_condition = "explicit" if sequence % 2 == 1 else "ambiguous"
+	var block := posmod(sequence - 1,4)
+	participant_a_seat = 0 if block < 2 else 1
+	experiment_setup_locked = true
+	return true
+
+
+func clear_experiment_setup() -> void:
+	dyad_sequence = 0
+	dyad_id = ""
+	participant_a = ""
+	participant_b = ""
+	participant_a_seat = 0
+	attribution_condition = ""
+	experiment_setup_locked = false
+
+
+func participant_id_for_seat(seat: int) -> String:
+	if not experiment_setup_locked:
+		return ""
+	return participant_a if seat == participant_a_seat else participant_b
+
+
+func participant_letter_for_seat(seat: int) -> String:
+	if not experiment_setup_locked:
+		return ""
+	return "A" if seat == participant_a_seat else "B"
 
 
 func active_mission_id() -> String:
@@ -181,11 +232,14 @@ func reset_run() -> void:
 	hull = MAX_HULL
 	boundary_proximity = 0.0
 	has_waypoint = false
+	last_waypoint_requested = Vector3.ZERO
+	last_waypoint_applied = Vector3.ZERO
 	_last_waypoint_msec = -1
 	mission_complete = false
 	ship_alive = true
 	_triggered_disturbances.clear()
 	_triggered_safe_gates.clear()
+	_pending_waypoint_drift_deg = 0.0
 	_reached_relays.clear()
 	last_relay_index = -1
 	hull_changed.emit(hull)
@@ -212,6 +266,9 @@ func update_mission_progress(previous: Vector3,current: Vector3) -> void:
 
 
 func set_waypoint(world_pos: Vector3) -> bool:
+	waypoint_request_sequence += 1
+	last_waypoint_requested = Vector3(world_pos.x,0.0,world_pos.z)
+	last_waypoint_applied = Vector3.ZERO
 	var now: int = Time.get_ticks_msec()
 	var remaining_s := waypoint_cooldown_remaining(now)
 	if remaining_s > 0.0:
@@ -232,11 +289,43 @@ func set_waypoint(world_pos: Vector3) -> bool:
 		waypoint_request_result.emit(false,"boundary",0.0)
 		return false
 	waypoint = requested
+	if not is_zero_approx(_pending_waypoint_drift_deg):
+		var pending := _pending_waypoint_drift_deg
+		_pending_waypoint_drift_deg = 0.0
+		_apply_waypoint_drift(pending,"next_waypoint",false)
+	last_waypoint_applied = waypoint
 	has_waypoint = true
 	_last_waypoint_msec = now
 	waypoint_changed.emit(waypoint, true)
 	waypoint_request_result.emit(true, "clamped_range" if clamped_to_range else "accepted", 0.0)
 	return true
+
+
+func trigger_waypoint_drift(angle_degrees: float) -> void:
+	if has_waypoint:
+		_apply_waypoint_drift(angle_degrees,"active_waypoint",true)
+	else:
+		_pending_waypoint_drift_deg = angle_degrees
+		disturbance_effect_applied.emit("waypoint_drift_armed",{
+			"angle_degrees":angle_degrees,
+			"reason":"no_active_waypoint",
+		})
+
+
+func _apply_waypoint_drift(angle_degrees: float,timing: String,notify_waypoint: bool) -> void:
+	var before := waypoint
+	var relative := waypoint-ship_position
+	relative = relative.rotated(Vector3.UP,deg_to_rad(angle_degrees))
+	waypoint = ship_position+relative
+	waypoint.y = 0.0
+	has_waypoint = true
+	if notify_waypoint:
+		waypoint_changed.emit(waypoint,true)
+	disturbance_effect_applied.emit("waypoint_drift",{
+		"angle_degrees":angle_degrees,"timing":timing,
+		"before_x":before.x,"before_z":before.z,
+		"after_x":waypoint.x,"after_z":waypoint.z,
+	})
 
 
 ## 星图每帧读取同一时钟，进度条和实际输入锁定不会发生漂移。

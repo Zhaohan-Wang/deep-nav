@@ -20,16 +20,16 @@
 | **领航员** | 大范围三维窗外，底下叠一块星图 | 在星图上点击放置航点，规划绕行与恢复 |
 | **驾驶员** | 船内第一人称驾驶舱 | `W A S D` 推进、刹车、转向，跟随航点飞行 |
 
-启动后两只物理鼠标分别控制席位 A / 席位 B 的虚拟光标。岗位由任务开始前的认领决定：谁点了领航员卡，谁的屏幕就显示星图。
+启动后两只物理鼠标分别控制席位 A / 席位 B 的虚拟光标。键盘固定为 **Mac 内置键盘 = 席位 A、外接键盘 = 席位 B**。岗位由任务开始前的认领决定，键盘职责随岗位变化：驾驶员键盘使用 WASD，领航员键盘使用 E。
 
 | 操作 | 作用 |
 | --- | --- |
 | 星图左键 | 放置航点（冷却 2 秒，最大距离 72 世界单位） |
-| `W A S D` | 驾驶员推进 / 刹车 / 转向 |
-| `E` | 升起或降下领航甲板 |
+| 驾驶员所在席位的 `W A S D` | 推进 / 刹车 / 转向 |
+| 领航员所在席位的 `E` | 升起或降下星图 |
 | `R` | 重置当前飞行 |
 | `F4` | 交换两块屏上的岗位画面 |
-| `F6` | 校正鼠标与屏幕对应关系 |
+| `F6` | 只校正鼠标与屏幕对应关系，不交换键盘 |
 
 航点不能丢到边界排斥区外。解体不会直接结束任务：训练关回起点，正式关回到最近一座已抵达的**中继站**。时限耗尽才判负。
 
@@ -83,11 +83,11 @@
 
 ## 实验数据
 
-标题页打开 **实验模式** 再点开始，会新建一份只追加、不覆盖的 session。调试模式不会混入正式样本：两个开关同时打开时，实验模式优先，并关掉调试显示。
+标题页打开 **实验模式** 再点开始，先输入数字组号，再建立只追加、不覆盖的 session。奇数组使用明确成因提示，偶数组只显示客观异常；A/B 屏幕侧每四组翻转一次，避免条件和固定屏幕混淆。调试模式不会混入正式样本。
 
 数据写在游戏可写目录：
 
-`user://experiments/deepnav_<UTC时间>/raw/`
+`user://experiments/dyad-D<组号>/<UTC时间>/raw/`
 
 macOS 上大致对应：
 
@@ -97,8 +97,12 @@ macOS 上大致对应：
 `raw/` 里有：
 
 - `session.csv`：会话元数据
-- `events.csv`：航点、碰撞、中继站、任务结束、量表提交
-- `frames.csv`：船体位置、航向、油门、耐久与当前航点
+- `events.csv`：双方航点、碰撞、中继站、扰动提示、任务结束、量表提交
+- `frames.csv`：每个物理帧的双方席位、光标、按键、驾驶输入和飞船状态
+- `audio/session.caf`：单设备整场 16-bit PCM 原始录音
+- `audio/audio_metadata.json`：录音时间戳、采样率、声道、帧数和完整性状态
+
+CSV 磁盘写入与录音都不在游戏主循环中执行。详细分组规则、字段和现场检查见 [实验数据说明](docs/experiment_data.md)。
 
 标题页的 **打开数据文件夹** 会先创建 `user://experiments/`，再用系统文件管理器打开，行为和 [Dyadic Force](https://github.com/Zhaohan-Wang/dyadic-force) 一致。
 
@@ -119,7 +123,16 @@ tools/run.sh
 
 ```bash
 tools/build_macos_hid_bridge.sh
+tools/build_macos_audio_recorder.sh
 ```
+
+制作包含双鼠标桥、录音 helper 和新应用图标的独立 macOS 包：
+
+```bash
+tools/package_macos.sh
+```
+
+默认输出到相邻的 `deep-nav-dist/`，其中包含 `DeepNav.app`、可分享的 `DeepNav-macOS.zip` 和实验数据位置说明。
 
 ## 校验
 
@@ -139,7 +152,7 @@ DEEP_NAV_RUNTIME_VALIDATION_OK
 
 ## 架构
 
-- Autoload：`Game` / `Displays` / `RawMice` / `ExperimentLog`
+- Autoload：`Game` / `AudioRecorder` / `ExperimentLog` / `RawMice` / `Displays`
 - 关卡目录：`scripts/mission_catalog.gd`
 - 双屏与虚拟光标：`scripts/display_coordinator.gd`
 - 实验写盘：`scripts/experiment_log.gd`

@@ -6,7 +6,7 @@ const Preview = preload("res://scripts/ui/mission_preview.gd")
 
 ## 认领角色卡的顺序：0 = 领航员，1 = 驾驶员。
 const ROLE_NAMES: Array[String] = ["领航员", "驾驶员"]
-const ROLE_BLURBS: Array[String] = ["掌握星图与航线，负责规划航点", "掌握驾驶舱与推进，负责执行机动"]
+const ROLE_BLURBS: Array[String] = ["掌握星图与航线 · 使用所在屏幕键盘的 E 键开关星图", "掌握驾驶舱与推进 · 使用所在屏幕键盘的 WASD 驾驶"]
 const ROLE_ICONS: Array[String] = [UiStyle.NAVIGATOR_BADGE_PATH, UiStyle.PILOT_BADGE_PATH]
 const SEAT_NONE: int = -1
 const SEAT_A: int = 0
@@ -27,6 +27,7 @@ var _launch_button: Button
 
 
 func _ready() -> void:
+	RawMice.keyboard_device_changed.connect(_on_keyboard_device_changed)
 	add_child(UI.page())
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -66,10 +67,6 @@ func _ready() -> void:
 		_show_sequence_complete()
 	else:
 		_select(Catalog.by_id(active_id))
-		for card: Button in _cards:
-			if not card.disabled:
-				card.grab_focus.call_deferred()
-				break
 
 
 func _build_header(root: VBoxContainer) -> void:
@@ -515,14 +512,23 @@ func _refresh_claim_ui() -> void:
 		else:
 			status.text = "✓ 已由%s认领" % _seat_name(seat)
 			status.add_theme_color_override("font_color",_seat_color(seat))
-	var ready := not _role_claims.has(SEAT_NONE)
+	var roles_ready := not _role_claims.has(SEAT_NONE)
+	var keyboards_ready := not Game.experiment_mode or RawMice.connected_keyboard_count()>=2
+	var ready := roles_ready and keyboards_ready
 	_start_button.disabled = not ready
-	_start_button.text = "开始任务" if ready else "等待双方认领"
+	_start_button.text = "开始任务" if ready else ("等待两把键盘" if roles_ready else "等待双方认领")
 	if ready:
-		_claim_hint.text = "屏幕 A → %s ｜ 屏幕 B → %s ，任务画面将按此分配" % [_seat_role_name(SEAT_A),_seat_role_name(SEAT_B)]
+		_claim_hint.text = "屏幕 A（内置键盘）→ %s ｜ 屏幕 B（外接键盘）→ %s" % [_seat_role_name(SEAT_A),_seat_role_name(SEAT_B)]
 		_claim_hint.add_theme_color_override("font_color",UI.TEXT)
+	elif roles_ready and not keyboards_ready:
+		_claim_hint.text = "实验模式需要：屏幕 A 的 Mac 内置键盘 + 屏幕 B 的一把外接键盘（当前 %d / 2）" % RawMice.connected_keyboard_count()
+		_claim_hint.add_theme_color_override("font_color",UI.DANGER)
 	else:
 		_claim_hint.add_theme_color_override("font_color",UI.MUTED)
+
+
+func _on_keyboard_device_changed(_seat: int,_connected: bool,_product: String) -> void:
+	_refresh_claim_ui()
 
 
 func _seat_name(seat: int) -> String:
@@ -557,6 +563,8 @@ func _close_confirm() -> void:
 
 func _launch() -> void:
 	if _selected == null or not Game.can_play_mission(_selected.id) or _role_claims.has(SEAT_NONE):
+		return
+	if Game.experiment_mode and RawMice.connected_keyboard_count()<2:
 		return
 	# 认领结果决定屏幕分配：领航员被屏幕 A 认领 → 主屏显示领航员画面，反之显示驾驶员。
 	var primary_role: int = Displays.Role.NAVIGATOR if _role_claims[0] == SEAT_A else Displays.Role.PILOT

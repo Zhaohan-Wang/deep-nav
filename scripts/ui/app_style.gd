@@ -34,13 +34,15 @@ static func label(text: String, size: int = 24, color: Color = TEXT) -> Label:
 
 static func button(text: String, min_size := Vector2(320, 72), accent: bool = false) -> Button:
 	var out := Button.new(); out.text = text; out.custom_minimum_size = min_size
+	# UI 只由两只实体鼠标操作；禁用键盘/手柄焦点，避免默认焦点框伪装成不一致的 hover。
+	out.focus_mode = Control.FOCUS_NONE
 	out.add_theme_font_override("font", FONT_CJK); out.add_theme_font_size_override("font_size", 23)
 	out.add_theme_color_override("font_color", BG if accent else TEXT)
 	out.add_theme_color_override("font_hover_color", BG)
 	out.add_theme_stylebox_override("normal", box(AMBER if accent else PANEL_2, CYAN if accent else Color("29435a"), 2))
 	out.add_theme_stylebox_override("hover", box(CYAN, CYAN, 2))
 	out.add_theme_stylebox_override("pressed", box(AMBER, TEXT, 3))
-	out.add_theme_stylebox_override("focus", box(Color("162c40"), CYAN, 3))
+	out.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	return out
 
 

@@ -12,13 +12,15 @@ config_version=5
 
 config/name="DeepNav"
 config/description="双人双屏宇宙领航合作：领航员看大范围三维与全图，驾驶员从船内看整屏像素太空。"
+config/version="1.0"
 run/main_scene="res://scenes/title_screen.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
-config/icon="res://icon.svg"
+config/icon="res://assets/app/deep_nav_icon.png"
 
 [autoload]
 
 Game="*res://scripts/game_state.gd"
+AudioRecorder="*res://scripts/audio_recorder.gd"
 ExperimentLog="*res://scripts/experiment_log.gd"
 RawMice="*res://scripts/raw_mouse_input.gd"
 Displays="*res://scripts/display_coordinator.gd"
@@ -49,6 +51,7 @@ theme/custom_font="res://assets/fonts/BoldPixels.ttf"
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
+textures/vram_compression/import_etc2_astc=true
 rendering_device/driver.windows="d3d12"
 2d/snap/snap_2d_transforms_to_pixel=true
 2d/snap/snap_2d_vertices_to_pixel=true

@@ -96,6 +96,7 @@ func _ready() -> void:
 	Game.destination_reached.connect(_on_mission_success)
 	Game.waypoint_request_result.connect(_on_waypoint_request_result)
 	Game.disturbance_gate_crossed.connect(_on_disturbance_gate_crossed)
+	Game.disturbance_effect_applied.connect(_on_disturbance_effect_applied)
 	Game.safe_gate_crossed.connect(_on_safe_gate_crossed)
 	Game.relay_station_reached.connect(_on_relay_station_reached)
 	Displays.roles_swapped.connect(_on_display_roles_swapped)
@@ -510,6 +511,12 @@ func _apply_death_white(value: float) -> void:
 
 func _on_ship_hit(remaining: float) -> void:
 	_mission_hits += 1
+	ExperimentLog.log_event("ship_hit","pilot",{
+		"hit_index":_mission_hits,"remaining_hull":remaining,
+		"x":Game.ship_position.x,"z":Game.ship_position.z,
+		"velocity_x":Game.ship_velocity.x,"velocity_z":Game.ship_velocity.z,
+		"elapsed":_mission_elapsed,
+	})
 	_hurt_flash = 1.0
 	_light_flash = 1.0
 	_shake.add(0.95 if remaining > 0.1 else 1.25)
@@ -534,6 +541,9 @@ func _on_ship_exploded(world_pos: Vector3) -> void:
 	if _restarting:
 		return
 	_mission_deaths += 1
+	ExperimentLog.log_event("ship_exploded","pilot",{
+		"revival":_mission_deaths,"x":world_pos.x,"z":world_pos.z,"elapsed":_mission_elapsed,
+	})
 	_restarting = true
 	_prime_explosion_visual(world_pos)
 	# 顿帧强化冲击 → 白屏闪两下后拉到纯白 → 纯白遮挡下传回出生点 → 淡出。
@@ -676,14 +686,53 @@ func _on_waypoint_request_result(accepted: bool, reason: String, remaining_s: fl
 		_mission_waypoints += 1
 	if not accepted: _sfx_denied.play()
 	ExperimentLog.log_event("waypoint_request","navigator",{
-		"accepted":accepted,"reason":reason,"remaining_s":remaining_s,"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z
+		"request_sequence":Game.waypoint_request_sequence,
+		"requested_x":Game.last_waypoint_requested.x,
+		"requested_z":Game.last_waypoint_requested.z,
+		"applied_x":Game.last_waypoint_applied.x if accepted else null,
+		"applied_z":Game.last_waypoint_applied.z if accepted else null,
+		"accepted":accepted,"reason":reason,"remaining_s":remaining_s,
+		"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z,
 	})
 
 
 func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> void:
 	ExperimentLog.log_event("disturbance_gate_crossed","system",{
-		"index":index,"slot":slot,"anchor_x":anchor.x,"anchor_z":anchor.z
+		"index":index,"slot":slot,"anchor_x":anchor.x,"anchor_z":anchor.z,
+		"condition":Game.attribution_condition,
 	})
+	match slot:
+		"waypoint_drift":
+			Game.trigger_waypoint_drift(13.0)
+		"ship_shear":
+			if _ship != null:
+				var impulse := _ship.apply_experiment_shear(4.8)
+				Game.disturbance_effect_applied.emit("ship_shear",{
+					"impulse_x":impulse.x,"impulse_z":impulse.z,"strength":4.8,
+				})
+		"recovery_window":
+			Game.disturbance_effect_applied.emit("recovery_window",{})
+
+
+func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
+	var details := payload.duplicate()
+	details["condition"] = Game.attribution_condition
+	ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+	var explicit := Game.attribution_condition=="explicit"
+	var message := ""
+	match effect:
+		"waypoint_drift","waypoint_drift_armed":
+			message = "系统说明：磁暴造成航点方向偏移 13°" if explicit else "系统提示：航点方向出现 13°偏差"
+		"ship_shear":
+			message = "系统说明：太阳风剪切造成飞船横向偏移" if explicit else "系统提示：飞船出现横向偏移"
+		"recovery_window":
+			message = "系统说明：太阳风影响减弱，进入恢复窗口" if explicit else "系统提示：航行状态进入恢复窗口"
+	if message.is_empty():
+		return
+	if _navigator_view != null:
+		_navigator_view.show_experiment_notice(message)
+	if _pilot_view != null:
+		_pilot_view.show_experiment_notice(message)
 
 
 func _on_safe_gate_crossed(index: int,anchor: Vector3) -> void:

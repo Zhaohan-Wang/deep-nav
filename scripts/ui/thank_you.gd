@@ -97,7 +97,6 @@ func _ready() -> void:
 	quit.name = "QuitButton"
 	quit.pressed.connect(func() -> void: get_tree().quit())
 	actions.add_child(quit)
-	back.grab_focus.call_deferred()
 
 
 func _return_to_title() -> void:

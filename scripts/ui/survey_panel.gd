@@ -112,6 +112,7 @@ func _build_attribution_page() -> void:
 	for i: int in range(CAUSE_OPTIONS.size()):
 		var option := Button.new()
 		option.text = CAUSE_OPTIONS[i]
+		option.focus_mode = Control.FOCUS_NONE
 		option.custom_minimum_size = Vector2(0,58)
 		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		option.add_theme_font_override("font",AppStyle.FONT_CJK)
@@ -146,7 +147,7 @@ func _refresh_cause_buttons() -> void:
 		option.add_theme_stylebox_override("normal",_choice_box(fill,border,2 if selected else 1))
 		option.add_theme_stylebox_override("hover",_choice_box(Color("16394a"),AppStyle.CYAN,2))
 		option.add_theme_stylebox_override("pressed",_choice_box(AppStyle.AMBER,AppStyle.TEXT,2))
-		option.add_theme_stylebox_override("focus",_choice_box(fill,border,2))
+		option.add_theme_stylebox_override("focus",StyleBoxEmpty.new())
 		option.add_theme_color_override("font_color",AppStyle.CYAN if selected else AppStyle.TEXT)
 		option.add_theme_color_override("font_hover_color",AppStyle.CYAN)
 		option.text = ("✓ " + CAUSE_OPTIONS[i]) if selected else CAUSE_OPTIONS[i]

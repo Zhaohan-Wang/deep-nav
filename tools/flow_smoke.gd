@@ -6,6 +6,7 @@ func _initialize() -> void: _run.call_deferred()
 func _run() -> void:
 	for path: String in [
 		"res://scenes/title_screen.tscn",
+		"res://scenes/experiment_setup.tscn",
 		"res://scenes/level_select.tscn",
 		"res://scenes/main.tscn",
 		"res://scenes/thank_you.tscn",
@@ -19,6 +20,9 @@ func _run() -> void:
 			assert(page.find_child("ThankYouArtwork",true,false) != null, "thank-you artwork missing")
 			assert(page.find_child("ReturnToTitleButton",true,false) != null, "thank-you return button missing")
 			assert(page.find_child("QuitButton",true,false) != null, "thank-you quit button missing")
+		elif path.ends_with("experiment_setup.tscn"):
+			assert(page.find_child("DyadNumber",true,false) != null, "experiment group field missing")
+			assert(page.find_child("ContinueButton",true,false) != null, "experiment continue button missing")
 		print("FLOW_SCENE_OK %s nodes=%d" % [path, _count(page)])
 		page.queue_free(); await process_frame
 	var catalog = load("res://scripts/mission_catalog.gd")

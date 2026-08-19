@@ -40,6 +40,8 @@ var _hull_label: Label
 var _alert_kind: int = AlertKind.IDLE
 var _impact_hold: float = 0.0
 var _relay_hold: float = 0.0
+var _experiment_hold: float = 0.0
+var _experiment_notice: String = ""
 var _proximity_on: bool = false
 
 
@@ -125,6 +127,8 @@ func _process(delta: float) -> void:
 		_impact_hold = maxf(0.0, _impact_hold - delta)
 	if _relay_hold > 0.0:
 		_relay_hold = maxf(0.0, _relay_hold - delta)
+	if _experiment_hold > 0.0:
+		_experiment_hold = maxf(0.0,_experiment_hold-delta)
 	_refresh_alert()
 
 
@@ -136,6 +140,9 @@ func _refresh_alert() -> void:
 	if _impact_hold > 0.0:
 		_apply_alert(AlertKind.IMPACT, "撞击警告", "impact", UiStyle.DANGER)
 		return
+	if _experiment_hold > 0.0:
+		_apply_alert(AlertKind.RELAY,_experiment_notice,"signal",UiStyle.AMBER)
+		return
 	if _relay_hold > 0.0:
 		return
 	if Game.boundary_proximity > 0.08:
@@ -145,6 +152,12 @@ func _refresh_alert() -> void:
 		_apply_alert(AlertKind.PROXIMITY, "撞击警告", "impact", UiStyle.DANGER)
 		return
 	_apply_alert(AlertKind.IDLE, _default_alert_text(), "signal", UiStyle.MUTED)
+
+
+func show_experiment_notice(message: String) -> void:
+	_experiment_notice = message
+	_experiment_hold = 4.2
+	_refresh_alert()
 
 
 ## 接近致死行星时为 true；带进入/退出回差，避免在警戒圈边缘来回跳。

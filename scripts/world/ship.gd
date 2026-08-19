@@ -131,6 +131,13 @@ func _detect_impact() -> void:
 	_apply_impact_damage(impact)
 
 
+## 实验扰动使用一次性横向冲量，保留刚体碰撞和驾驶员后续修正的真实轨迹。
+func apply_experiment_shear(strength: float) -> Vector3:
+	var lateral := global_transform.basis.x.normalized()*strength
+	apply_central_impulse(lateral)
+	return lateral
+
+
 func _is_touching_group(group_name: String) -> bool:
 	var bodies: Array = get_colliding_bodies()
 	for i: int in range(bodies.size()):

@@ -2,11 +2,14 @@ class_name NavigatorView
 extends Control
 ## 领航员整页为 16:9 三维；星图是叠在画面上的小 16:9 显示器。
 
+const HID_KEY_E: int = 0x08
+
 var view_host: Control
 var _map: SectorMap
 var _status: Label
 var _help: Label
 var _stages: DualStageColumn
+var _notice_serial: int = 0
 
 
 func _ready() -> void:
@@ -18,6 +21,7 @@ func _ready() -> void:
 	Game.waypoint_request_result.connect(_on_waypoint_result)
 	Game.destination_reached.connect(_on_arrived)
 	Game.relay_station_reached.connect(_on_relay_reached)
+	RawMice.key_changed.connect(_on_keyboard_key)
 	_on_ship_state(Game.ship_position, Game.ship_heading, Game.ship_speed, Game.throttle)
 	_show_briefing()
 
@@ -86,9 +90,27 @@ func _build() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("toggle_nav_deck") and _stages != null:
-		_stages.toggle_deck()
+	# HID 桥可用时由固定席位键盘信号处理，避免外接键盘的系统合并事件重复触发。
+	if (event.is_action_pressed("toggle_nav_deck") and not RawMice.is_ready()
+			and Displays.role_for_seat(0)==Displays.Role.NAVIGATOR):
+		_toggle_map(0,"system_fallback")
 		get_viewport().set_input_as_handled()
+
+
+func _on_keyboard_key(seat: int,usage: int,pressed: bool) -> void:
+	if not pressed or usage!=HID_KEY_E or Displays.role_for_seat(seat)!=Displays.Role.NAVIGATOR:
+		return
+	_toggle_map(seat,"hid")
+
+
+func _toggle_map(seat: int,source: String) -> void:
+	if _stages==null:
+		return
+	_stages.toggle_deck()
+	ExperimentLog.log_event("navigator_map_toggle","navigator",{
+		"seat":seat,"source":source,"raised":_stages.deck_raised,
+		"keyboard":RawMice.keyboard_name(seat),
+	})
 
 
 func _on_map_waypoint(world_pos: Vector3) -> void:
@@ -110,7 +132,8 @@ func _on_ship_state(_position: Vector3, heading: float, speed: float, _throttle:
 func _show_briefing() -> void:
 	if Game.current_sector == null:
 		return
-	_help.text = Game.current_sector.participant_briefing if not Game.current_sector.participant_briefing.is_empty() else "抵达指定目标航区。"
+	var briefing := Game.current_sector.participant_briefing if not Game.current_sector.participant_briefing.is_empty() else "抵达指定目标航区。"
+	_help.text = "%s · 按 E 开关星图" % briefing
 	_help.add_theme_color_override("font_color", UiStyle.AMBER)
 
 
@@ -138,6 +161,20 @@ func _on_waypoint_result(accepted: bool,reason: String,_remaining_s: float) -> v
 func _on_relay_reached(_index: int, _position: Vector3, station_name: String) -> void:
 	_help.text = "已抵达%s · 解体后将从此处继续" % station_name
 	_help.add_theme_color_override("font_color", UiStyle.CYAN)
+
+
+func show_experiment_notice(message: String) -> void:
+	_notice_serial += 1
+	var serial := _notice_serial
+	_help.text = message
+	_help.add_theme_color_override("font_color",UiStyle.AMBER)
+	await get_tree().create_timer(4.2).timeout
+	if serial!=_notice_serial or not is_instance_valid(_help):
+		return
+	if Game.has_waypoint:
+		_on_waypoint(Game.waypoint,true)
+	else:
+		_show_briefing()
 
 
 func _on_arrived() -> void:

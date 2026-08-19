@@ -37,14 +37,13 @@ func _ready() -> void:
 	var experiment_switch := _mode_switch("实验模式", Game.experiment_mode, func(v): Game.experiment_mode = v)
 	experiment_switch.name = "ExperimentModeSwitch"
 	menu.add_child(experiment_switch)
-	var start := UI.button("开始游戏",Vector2(380,74),true); start.pressed.connect(_start); menu.add_child(start)
-	var settings := UI.button("设置",Vector2(380,64)); settings.pressed.connect(_open_settings); menu.add_child(settings)
+	var start := UI.button("开始游戏",Vector2(380,74),true); start.name = "StartButton"; start.pressed.connect(_start); menu.add_child(start)
+	var settings := UI.button("设置",Vector2(380,64)); settings.name = "SettingsButton"; settings.pressed.connect(_open_settings); menu.add_child(settings)
 	var data := UI.button("打开数据文件夹",Vector2(380,64))
 	data.name = "OpenDataFolderButton"
 	data.pressed.connect(_open_experiment_logs)
 	menu.add_child(data)
-	var quit := UI.button("退出",Vector2(380,64)); quit.pressed.connect(func(): get_tree().quit()); menu.add_child(quit)
-	start.grab_focus.call_deferred()
+	var quit := UI.button("退出",Vector2(380,64)); quit.name = "QuitButton"; quit.pressed.connect(func(): get_tree().quit()); menu.add_child(quit)
 
 
 func _build_cover() -> void:
@@ -90,10 +89,13 @@ func _start() -> void:
 	Game.save_settings()
 	# 每次从标题页开始都建立一份新的内存进度；退出应用或重新开始均从训练关归零。
 	Game.begin_mission_sequence()
-	# 标题页是实验组间边界：先关闭可能残留的旧 session，再建立新目录。
+	# 标题页是实验组间边界；实验模式先录入组号，锁定后才创建 session。
 	ExperimentLog.close_session()
-	ExperimentLog.begin_session()
-	get_tree().change_scene_to_file("res://scenes/level_select.tscn")
+	Game.clear_experiment_setup()
+	get_tree().change_scene_to_file(
+		"res://scenes/experiment_setup.tscn" if Game.experiment_mode
+		else "res://scenes/level_select.tscn"
+	)
 
 
 func _open_experiment_logs() -> void:
@@ -128,7 +130,7 @@ func _mode_switch(text: String, value: bool, changed: Callable) -> Control:
 	toggle.button_pressed = value
 	toggle.custom_minimum_size = Vector2(TRACK_W,TRACK_H)
 	toggle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	toggle.focus_mode = Control.FOCUS_ALL
+	toggle.focus_mode = Control.FOCUS_NONE
 	toggle.flat = true
 	toggle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	for state: String in ["normal","hover","pressed","hover_pressed","focus","disabled"]:
@@ -164,9 +166,8 @@ func _mode_switch(text: String, value: bool, changed: Callable) -> Control:
 	row.add_child(state_label)
 
 	toggle.resized.connect(func(): toggle.pivot_offset = toggle.size*0.5)
-	toggle.focus_entered.connect(func(): _animate_switch_focus(toggle,1.08))
-	toggle.focus_exited.connect(func(): _animate_switch_focus(toggle,1.0))
-	toggle.mouse_entered.connect(func(): toggle.grab_focus())
+	toggle.mouse_entered.connect(func(): _animate_switch_hover(toggle,1.08))
+	toggle.mouse_exited.connect(func(): _animate_switch_hover(toggle,1.0))
 	toggle.toggled.connect(func(on: bool):
 		track.add_theme_stylebox_override("panel",track_on if on else track_off)
 		knob_style.bg_color = UI.AMBER if on else UI.TEXT
@@ -196,7 +197,7 @@ func _switch_track_style(fill: Color, border: Color) -> StyleBoxFlat:
 	return style
 
 
-func _animate_switch_focus(toggle: Button, target: float) -> void:
+func _animate_switch_hover(toggle: Button, target: float) -> void:
 	var tween := toggle.create_tween()
 	tween.tween_property(toggle,"scale",Vector2.ONE*target,0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
@@ -214,7 +215,7 @@ func _open_settings() -> void:
 	box.add_child(_slider("主音量", 0, 100, Game.master_volume * 100.0, func(v): Game.master_volume = v / 100.0, "%d%%"))
 	box.add_child(_slider("航点冷却", 1, 5, Game.waypoint_cooldown_s, func(v): Game.waypoint_cooldown_s = v, "%.0f 秒"))
 	box.add_child(_slider("航点最大距离", 24, 140, Game.waypoint_max_distance, func(v): Game.waypoint_max_distance = v, "%.0f 单位"))
-	var done := UI.button("保存并返回", Vector2(360,72), true); done.pressed.connect(_close_settings); box.add_child(done); done.grab_focus.call_deferred()
+	var done := UI.button("保存并返回", Vector2(360,72), true); done.pressed.connect(_close_settings); box.add_child(done)
 
 func _toggle(text: String, value: bool, changed: Callable) -> Control:
 	var row := HBoxContainer.new(); var label := UI.label(text, 23); label.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(label)
