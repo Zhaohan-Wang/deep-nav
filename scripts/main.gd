@@ -1,6 +1,9 @@
 extends Node
 ## 左右分屏。3D 世界挂在主场景，两个 SubViewport 共用同一套世界与各自相机。
 
+const SurveyPanelScript = preload("res://scripts/ui/survey_panel.gd")
+const MissionResultPanelScript = preload("res://scripts/ui/mission_result_panel.gd")
+
 const VIEW_SIZE := Vector2i(640, 360)
 const VIEW_FOV: float = 64.0
 ## 驾驶员比领航员更窄，窗口里放大一点，少看到全景。
@@ -43,7 +46,9 @@ var _pilot_view: PilotView
 var _nav_slot: Control
 var _pilot_slot: Control
 var _split: HBoxContainer
+var _bezel: ColorRect
 var _extra_window: Window
+var _root_ui: Control
 var _sfx_confirm: AudioStreamPlayer
 var _sfx_denied: AudioStreamPlayer
 var _sfx_complete: AudioStreamPlayer
@@ -67,6 +72,15 @@ var _pilot_fog_mat: ShaderMaterial
 var _nav_arm_offset: Vector3 = Vector3.ZERO
 var _camera_probe: SphereShape3D
 var _camera_probe_query: PhysicsShapeQueryParameters3D
+var _mission_elapsed: float = 0.0
+var _mission_deaths: int = 0
+var _mission_hits: int = 0
+var _mission_waypoints: int = 0
+var _mission_finishing: bool = false
+var _mission_ended: bool = false
+var _mission_outcome: String = ""
+var _survey_answers: Dictionary = {}
+var _result_panels: Array[Control] = []
 
 
 func _ready() -> void:
@@ -79,12 +93,20 @@ func _ready() -> void:
 	Game.destination_reached.connect(_on_complete_sfx)
 	Game.view_mode_changed.connect(_apply_view_mode)
 	Game.ship_hit.connect(_on_ship_hit)
+	Game.destination_reached.connect(_on_mission_success)
+	Game.waypoint_request_result.connect(_on_waypoint_request_result)
+	Game.disturbance_gate_crossed.connect(_on_disturbance_gate_crossed)
+	Game.safe_gate_crossed.connect(_on_safe_gate_crossed)
+	Game.relay_station_reached.connect(_on_relay_station_reached)
+	Displays.roles_swapped.connect(_on_display_roles_swapped)
+	# 双屏贯穿整个应用；单显示器环境也保留两个并排窗口用于开发预览。
+	Game.set_view_mode(Game.ViewMode.DUAL_WINDOW)
 
 
 func _process(delta: float) -> void:
 	if _ship == null or _nav_camera == null or _pilot_camera == null:
 		return
-	var shake: Vector3 = _shake.tick(delta)
+	var shake: Vector3 = _shake.tick(delta) if Game.screen_shake_enabled else Vector3.ZERO
 	_hurt_flash = move_toward(_hurt_flash, 0.0, delta * 2.4)
 	# 受击红光带一点频闪，比匀速淡出更像灯光故障。
 	var flicker: float = 0.72 + 0.28 * sin(float(Time.get_ticks_msec()) * 0.055)
@@ -100,6 +122,15 @@ func _process(delta: float) -> void:
 	_pilot_camera.rotation_degrees.z = shake.x * 4.5
 	_apply_ship_focus(_nav_camera, _nav_fog_mat, _nav_camera.global_position.distance_to(_ship.global_position) + NAV_FOCUS_PADDING)
 	_apply_ship_focus(_pilot_camera, _pilot_fog_mat, PILOT_FOCUS_AHEAD)
+	if not _mission_ended and not _mission_finishing and Game.current_sector != null:
+		_mission_elapsed += delta
+		if _mission_elapsed >= Game.current_sector.time_limit_s:
+			_mission_elapsed = Game.current_sector.time_limit_s
+			_begin_mission_end("超时未完成",false)
+
+
+func _physics_process(_delta: float) -> void:
+	ExperimentLog.sample_frame()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -112,6 +143,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("reset_run"):
 		_reset_run()
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("switch_pointer_role") and Game.view_mode == Game.ViewMode.DUAL_WINDOW:
+		_switch_pointer_role()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("swap_mouse_seats"):
+		RawMice.swap_mouse_seats()
+		get_viewport().set_input_as_handled()
 
 
 func _bind_inputs() -> void:
@@ -123,6 +160,8 @@ func _bind_inputs() -> void:
 	_bind_key("dual_window", KEY_F3)
 	_bind_key("reset_run", KEY_R)
 	_bind_key("toggle_nav_deck", KEY_E)
+	_bind_key("switch_pointer_role", KEY_F4)
+	_bind_key("swap_mouse_seats", KEY_F6)
 
 
 func _bind_key(action: String, key: Key) -> void:
@@ -151,6 +190,7 @@ func _make_player(path: String) -> AudioStreamPlayer:
 
 func _build_ui() -> void:
 	var ui := Control.new()
+	_root_ui = ui
 	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(ui)
@@ -167,9 +207,9 @@ func _build_ui() -> void:
 	_nav_slot.size_flags_stretch_ratio = 1.0
 	_split.add_child(_nav_slot)
 
-	var bezel: ColorRect = UiStyle.make_color_rect(Color("05060a"))
-	bezel.custom_minimum_size = Vector2(6.0, 0.0)
-	_split.add_child(bezel)
+	_bezel = UiStyle.make_color_rect(Color("05060a"))
+	_bezel.custom_minimum_size = Vector2(6.0, 0.0)
+	_split.add_child(_bezel)
 
 	_pilot_slot = UiStyle.make_wide_page_frame(_pilot_view)
 	_split.add_child(_pilot_slot)
@@ -469,6 +509,7 @@ func _apply_death_white(value: float) -> void:
 
 
 func _on_ship_hit(remaining: float) -> void:
+	_mission_hits += 1
 	_hurt_flash = 1.0
 	_light_flash = 1.0
 	_shake.add(0.95 if remaining > 0.1 else 1.25)
@@ -482,30 +523,50 @@ func _on_ship_hit(remaining: float) -> void:
 
 
 func _on_ship_exploded(world_pos: Vector3) -> void:
-	# 传回起点后，旧碰撞缓存可能再发一次解体。此时序列还在跑，忽略并保持能开。
-	if _restarting:
-		if _death_time >= DEATH_RESET_TIME:
-			Game.ship_alive = true
-			if _ship != null:
-				_ship.snap_to_state()
+	if _mission_ended:
 		return
+	# 超时判负时只播放终局爆炸，不再进入复活分支。
+	if _mission_finishing:
+		_prime_explosion_visual(world_pos)
+		_death_time = 0.0
+		return
+	# 旧碰撞缓存可能在复活序列中再发一次解体；忽略重复信号。
+	if _restarting:
+		return
+	_mission_deaths += 1
 	_restarting = true
-	_shake.add(1.35)
-	_hurt_flash = 1.0
-	_light_flash = 1.0
-	_sfx_denied.play()
-	if _world != null:
-		ShipBurst3D.play(_world, world_pos)
+	_prime_explosion_visual(world_pos)
 	# 顿帧强化冲击 → 白屏闪两下后拉到纯白 → 纯白遮挡下传回出生点 → 淡出。
 	Engine.time_scale = 0.08
 	await get_tree().create_timer(0.09, true, false, true).timeout
 	Engine.time_scale = 1.0
 	_death_time = 0.0
 	await get_tree().create_timer(DEATH_RESET_TIME, true, false, true).timeout
-	_reset_run(false)
+	if _mission_finishing:
+		_restarting = false
+		return
+	var checkpoint := Game.last_respawn_point()
+	Game.respawn_ship_at(checkpoint.position,checkpoint.heading)
+	if _ship != null:
+		_ship.snap_to_state()
+	ExperimentLog.log_event("ship_respawn","system",{
+		"revival":_mission_deaths,"relay":checkpoint.index,"relay_name":checkpoint.name,
+		"x":checkpoint.position.x,"z":checkpoint.position.z,"elapsed":_mission_elapsed
+	})
+	# 重生瞬间给一点暖光，明确告诉玩家已经重新接管飞船。
+	_light_flash = 0.5
 	var total: float = DEATH_CURVE[DEATH_CURVE.size() - 1].x
 	await get_tree().create_timer(total - DEATH_RESET_TIME, true, false, true).timeout
 	_restarting = false
+
+
+func _prime_explosion_visual(world_pos: Vector3) -> void:
+	_shake.add(1.35)
+	_hurt_flash = 1.0
+	_light_flash = 1.0
+	_sfx_denied.play()
+	if _world != null:
+		ShipBurst3D.play(_world,world_pos)
 
 
 func _apply_view_mode(mode: int) -> void:
@@ -515,6 +576,8 @@ func _apply_view_mode(mode: int) -> void:
 	_pilot_slot.visible = mode != Game.ViewMode.NAVIGATOR_ONLY
 	if mode == Game.ViewMode.DUAL_WINDOW:
 		_open_extra_window()
+	else:
+		_restore_main_window()
 
 
 func _toggle_dual_window() -> void:
@@ -527,44 +590,58 @@ func _toggle_dual_window() -> void:
 func _open_extra_window() -> void:
 	if _extra_window != null:
 		return
-	_extra_window = Window.new()
-	_extra_window.title = "DeepNav — 驾驶员"
-	_extra_window.size = Vector2i(960, 1080)
-	var screen_index: int = mini(1, DisplayServer.get_screen_count() - 1)
-	_extra_window.current_screen = screen_index
-	_extra_window.position = DisplayServer.screen_get_position(screen_index)
-	_extra_window.close_requested.connect(_on_extra_close)
-	add_child(_extra_window)
-	# 副窗同样用 16:9 页框，避免驾驶员页被拉成竖屏。
-	var extra_page: Control = UiStyle.make_wide_page_frame(_pilot_view)
-	extra_page.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_extra_window.add_child(extra_page)
-	_nav_slot.size_flags_stretch_ratio = 1.0
-	_pilot_slot.visible = false
+	_apply_display_role_layout()
 
 
 func _close_extra_window() -> void:
 	if _extra_window == null:
 		return
-	# 副窗关掉后，把驾驶员页塞回左侧 16:9 页框。
-	var pilot_frame: AspectRatioContainer = _find_page_frame(_pilot_slot)
-	if _pilot_view.get_parent() != pilot_frame and pilot_frame != null:
-		_pilot_view.reparent(pilot_frame)
-	_extra_window.queue_free()
+	var secondary_slot := _secondary_role_slot()
+	Displays.release_role_page(secondary_slot)
+	_return_role_slots_to_split()
 	_extra_window = null
 	_pilot_slot.visible = true
 	_nav_slot.size_flags_stretch_ratio = 1.0
+	_bezel.visible = true
 
 
-func _find_page_frame(slot: Control) -> AspectRatioContainer:
-	for child in slot.get_children():
-		if child is AspectRatioContainer:
-			return child as AspectRatioContainer
-	return null
+func _apply_display_role_layout() -> void:
+	_return_role_slots_to_split()
+	var secondary_slot := _secondary_role_slot()
+	secondary_slot.visible = true
+	_extra_window = Displays.show_role_page(secondary_slot)
+	_nav_slot.visible = true
+	_pilot_slot.visible = true
+	_bezel.visible = false
 
 
-func _on_extra_close() -> void:
-	Game.set_view_mode(Game.ViewMode.SPLIT)
+func _secondary_role_slot() -> Control:
+	return _nav_slot if Displays.secondary_role() == Displays.Role.NAVIGATOR else _pilot_slot
+
+
+func _return_role_slots_to_split() -> void:
+	for slot: Control in [_nav_slot, _pilot_slot]:
+		if slot.get_parent() != _split:
+			if slot.get_parent() == null:
+				_split.add_child(slot)
+			else:
+				slot.reparent(_split)
+	_split.move_child(_nav_slot, 0)
+	_split.move_child(_bezel, 1)
+	_split.move_child(_pilot_slot, 2)
+
+
+func _on_display_roles_swapped(_primary_role: int, _secondary_role: int) -> void:
+	if Game.view_mode == Game.ViewMode.DUAL_WINDOW:
+		_apply_display_role_layout()
+
+
+func _switch_pointer_role() -> void:
+	Displays.swap_roles()
+
+
+func _restore_main_window() -> void:
+	Displays.relayout()
 
 
 ## clear_death_white=false 供解体流程使用：传回出生点时白屏还要继续盖着。
@@ -594,5 +671,104 @@ func _on_waypoint_sfx(_pos: Vector3, enabled: bool) -> void:
 		_sfx_confirm.play()
 
 
+func _on_waypoint_request_result(accepted: bool, reason: String, remaining_s: float) -> void:
+	if accepted:
+		_mission_waypoints += 1
+	if not accepted: _sfx_denied.play()
+	ExperimentLog.log_event("waypoint_request","navigator",{
+		"accepted":accepted,"reason":reason,"remaining_s":remaining_s,"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z
+	})
+
+
+func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> void:
+	ExperimentLog.log_event("disturbance_gate_crossed","system",{
+		"index":index,"slot":slot,"anchor_x":anchor.x,"anchor_z":anchor.z
+	})
+
+
+func _on_safe_gate_crossed(index: int,anchor: Vector3) -> void:
+	ExperimentLog.log_event("safe_gate_crossed","system",{
+		"index":index,"anchor_x":anchor.x,"anchor_z":anchor.z
+	})
+
+
+func _on_relay_station_reached(index: int,position: Vector3,station_name: String) -> void:
+	ExperimentLog.log_event("relay_station_reached","system",{
+		"index":index,"name":station_name,"x":position.x,"z":position.z
+	})
+
+
 func _on_complete_sfx() -> void:
 	_sfx_complete.play()
+
+
+func _on_mission_success() -> void:
+	_begin_mission_end("完成",true)
+
+
+func _begin_mission_end(outcome: String,success: bool) -> void:
+	if _mission_ended or _mission_finishing:
+		return
+	_mission_finishing = true
+	_mission_outcome = outcome
+	Engine.time_scale = 1.0
+	if not success:
+		# 时间耗尽才是失败条件；此时以完整爆炸反馈结束当前飞行。
+		if Game.ship_alive:
+			Game.explode_ship()
+		await get_tree().create_timer(1.25,true,false,true).timeout
+	else:
+		await get_tree().create_timer(0.65,true,false,true).timeout
+	_mission_ended = true
+	var limit := Game.current_sector.time_limit_s if Game.current_sector != null else _mission_elapsed
+	var summary := {
+		"outcome":outcome,"success":success,"elapsed":_mission_elapsed,"limit":limit,
+		"revivals":_mission_deaths,"hits":_mission_hits,"waypoints":_mission_waypoints,"hull":Game.hull
+	}
+	ExperimentLog.log_event("mission_end","system",summary)
+	await _show_result_flow(outcome,success,summary)
+	_show_surveys(outcome,summary)
+
+
+func _show_result_flow(outcome: String,success: bool,summary: Dictionary) -> void:
+	_result_panels.clear()
+	for entry: Dictionary in [
+		{"role":"navigator","parent":_navigator_view},
+		{"role":"pilot","parent":_pilot_view},
+	]:
+		var panel: Control = MissionResultPanelScript.new()
+		(entry.parent as Control).add_child(panel)
+		panel.setup(entry.role)
+		panel.show_result(outcome,success)
+		_result_panels.append(panel)
+	await get_tree().create_timer(1.65,true,false,true).timeout
+	for panel: Control in _result_panels:
+		if is_instance_valid(panel):
+			panel.show_summary(summary)
+	await get_tree().create_timer(2.8,true,false,true).timeout
+	for panel: Control in _result_panels:
+		if is_instance_valid(panel):
+			panel.queue_free()
+	_result_panels.clear()
+	await get_tree().process_frame
+
+
+func _show_surveys(outcome: String,summary: Dictionary) -> void:
+	var nav: Control = SurveyPanelScript.new(); _navigator_view.add_child(nav); nav.setup("navigator",outcome,summary); nav.submitted.connect(_on_survey_submitted)
+	var pilot: Control = SurveyPanelScript.new(); _pilot_view.add_child(pilot); pilot.setup("pilot",outcome,summary); pilot.submitted.connect(_on_survey_submitted)
+
+
+func _on_survey_submitted(role: String, answers: Dictionary) -> void:
+	_survey_answers[role]=answers; ExperimentLog.record_survey(role,"mission_end",answers)
+	if _survey_answers.size() >= 2:
+		# 两人均提交才算真正玩完本关；完成、超时等结果都锁住本关并推进队列。
+		Game.mark_current_mission_played(_mission_outcome)
+		var sequence_finished := Game.active_mission_id().is_empty()
+		await get_tree().create_timer(0.8).timeout
+		Game.set_view_mode(Game.ViewMode.SPLIT)
+		if sequence_finished:
+			# 最后一关量表落盘后结束本次实验，再进入双屏共享的感谢页。
+			ExperimentLog.close_session()
+			get_tree().change_scene_to_file("res://scenes/thank_you.tscn")
+		else:
+			get_tree().change_scene_to_file("res://scenes/level_select.tscn")

@@ -1,13 +1,21 @@
 extends Node
 ## 全局游戏状态：当前扇区、飞船、航点、显示模式。
 
+const Catalog = preload("res://scripts/mission_catalog.gd")
+const RouteGateScript = preload("res://scripts/route_gate.gd")
+
 signal ship_state_changed(position: Vector3, heading: float, speed: float, throttle: float)
 signal waypoint_changed(world_pos: Vector3, enabled: bool)
+signal waypoint_request_result(accepted: bool, reason: String, remaining_s: float)
 signal hull_changed(hull: float)
 signal destination_reached
 signal ship_hit(remaining_hull: float)
 signal ship_exploded(world_pos: Vector3)
 signal view_mode_changed(mode: int)
+signal settings_changed
+signal disturbance_gate_crossed(index: int,slot: String,anchor: Vector3)
+signal safe_gate_crossed(index: int,anchor: Vector3)
+signal relay_station_reached(index: int,position: Vector3,station_name: String)
 
 enum ViewMode {
 	SPLIT,
@@ -19,6 +27,8 @@ enum ViewMode {
 const SHIP_RADIUS: float = 1.2
 const MAX_HULL: float = 100.0
 const MAX_SPEED: float = 16.0
+## 飞到中继站这个半径内即认领；按计划航线经过时不会错过。
+const RELAY_REACH_RADIUS: float = 22.0
 
 var current_sector: SectorData
 var celestial_bodies: Array[CelestialBodyData] = []
@@ -29,16 +39,125 @@ var ship_angular_velocity: float = 0.0
 var ship_speed: float = 0.0
 var throttle: float = 0.0
 var hull: float = MAX_HULL
+## 0..1：接近连续世界边界的程度，供两端一致显示告警。
+var boundary_proximity: float = 0.0
 var waypoint: Vector3 = Vector3.ZERO
 var has_waypoint: bool = false
 var view_mode: int = ViewMode.SPLIT
 var mission_complete: bool = false
 var ship_alive: bool = true
+var selected_mission_id: String = "practice"
+## 本次应用运行内的临时关卡进度；不写 settings.cfg，退出应用即自然清空。
+var session_mission_index: int = 0
+var session_mission_results: Dictionary = {}
+var debug_mode: bool = false
+var experiment_mode: bool = false
+var master_volume: float = 0.85
+var screen_shake_enabled: bool = true
+var fullscreen_dual_display: bool = true
+var waypoint_cooldown_s: float = 2.0
+var waypoint_max_distance: float = 72.0
+const WAYPOINT_READY_NOTICE_S: float = 2.0
+const SETTINGS_PATH := "user://settings.cfg"
+var _last_waypoint_msec: int = -1
+var _triggered_disturbances: Dictionary = {}
+var _triggered_safe_gates: Dictionary = {}
+var _reached_relays: Dictionary = {}
+var last_relay_index: int = -1
+
+
+## 研究元数据只能在纯调试模式展示。实验模式拥有更高优先级，防止误开两个开关时泄漏条件。
+func researcher_debug_enabled() -> bool:
+	return debug_mode and not experiment_mode
 
 
 func _ready() -> void:
-	current_sector = SectorCatalog.make_sector_01()
+	_ensure_input_actions()
+	load_settings()
+	current_sector = Catalog.by_id(selected_mission_id)
 	_apply_sector()
+
+
+func _ensure_input_actions() -> void:
+	# 自动检查会直接实例化飞船而不经过 Main；先注册动作名，按键绑定仍由 Main 统一配置。
+	for action: String in ["thrust","brake","turn_left","turn_right"]:
+		if not InputMap.has_action(action):
+			InputMap.add_action(action)
+
+
+func select_mission(id: String) -> void:
+	selected_mission_id = id
+	current_sector = Catalog.by_id(id)
+	reset_run()
+
+
+func begin_mission_sequence() -> void:
+	session_mission_index = 0
+	session_mission_results.clear()
+	select_mission(Catalog.IDS[0])
+
+
+func active_mission_id() -> String:
+	if session_mission_index < 0 or session_mission_index >= Catalog.IDS.size():
+		return ""
+	return Catalog.IDS[session_mission_index]
+
+
+func can_play_mission(id: String) -> bool:
+	return not id.is_empty() and id == active_mission_id() and not session_mission_results.has(id)
+
+
+func mission_session_status(id: String) -> String:
+	if session_mission_results.has(id):
+		return "completed"
+	if id == active_mission_id():
+		return "current"
+	return "locked"
+
+
+func mark_current_mission_played(outcome: String) -> void:
+	var active := active_mission_id()
+	if active.is_empty() or selected_mission_id != active or session_mission_results.has(active):
+		return
+	session_mission_results[active] = outcome
+	session_mission_index += 1
+	var next_id := active_mission_id()
+	if not next_id.is_empty():
+		selected_mission_id = next_id
+		current_sector = Catalog.by_id(next_id)
+
+
+func load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return
+	master_volume = clampf(float(cfg.get_value("audio", "master_volume", 0.85)), 0.0, 1.0)
+	debug_mode = bool(cfg.get_value("mode", "debug", false))
+	experiment_mode = bool(cfg.get_value("mode", "experiment", false))
+	screen_shake_enabled = bool(cfg.get_value("visual", "screen_shake", true))
+	# 双屏是应用的固定结构，旧配置中的关闭值不再覆盖它。
+	fullscreen_dual_display = true
+	waypoint_cooldown_s = clampf(float(cfg.get_value("navigation", "cooldown_s", 2.0)), 0.5, 5.0)
+	waypoint_max_distance = clampf(float(cfg.get_value("navigation", "max_distance", 72.0)), 24.0, 140.0)
+	_apply_volume()
+
+
+func save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("audio", "master_volume", master_volume)
+	cfg.set_value("mode", "debug", debug_mode)
+	cfg.set_value("mode", "experiment", experiment_mode)
+	cfg.set_value("visual", "screen_shake", screen_shake_enabled)
+	cfg.set_value("visual", "dual_display", true)
+	cfg.set_value("navigation", "cooldown_s", waypoint_cooldown_s)
+	cfg.set_value("navigation", "max_distance", waypoint_max_distance)
+	cfg.save(SETTINGS_PATH)
+	_apply_volume()
+	settings_changed.emit()
+
+
+func _apply_volume() -> void:
+	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(master_volume, 0.001)))
 
 
 func world_half() -> float:
@@ -60,18 +179,92 @@ func reset_run() -> void:
 	ship_speed = 0.0
 	throttle = 0.0
 	hull = MAX_HULL
+	boundary_proximity = 0.0
 	has_waypoint = false
+	_last_waypoint_msec = -1
 	mission_complete = false
 	ship_alive = true
+	_triggered_disturbances.clear()
+	_triggered_safe_gates.clear()
+	_reached_relays.clear()
+	last_relay_index = -1
 	hull_changed.emit(hull)
 	waypoint_changed.emit(waypoint, false)
 	ship_state_changed.emit(ship_position, ship_heading, ship_speed, throttle)
 
 
-func set_waypoint(world_pos: Vector3) -> void:
-	waypoint = Vector3(world_pos.x, 0.0, world_pos.z)
+func update_mission_progress(previous: Vector3,current: Vector3) -> void:
+	if current_sector == null or mission_complete or not ship_alive: return
+	for i: int in range(current_sector.disturbance_anchors.size()):
+		if _triggered_disturbances.has(i): continue
+		var anchor:=current_sector.disturbance_anchors[i]
+		if RouteGateScript.crossed(previous,current,anchor,current_sector.route_checkpoints):
+			_triggered_disturbances[i]=true
+			var slot:=current_sector.disturbance_slots[i] if i<current_sector.disturbance_slots.size() else "event"
+			disturbance_gate_crossed.emit(i,slot,anchor)
+	for i: int in range(current_sector.safe_gate_points.size()):
+		if _triggered_safe_gates.has(i): continue
+		var anchor:=current_sector.safe_gate_points[i]
+		if RouteGateScript.crossed(previous,current,anchor,current_sector.route_checkpoints):
+			_triggered_safe_gates[i]=true
+			safe_gate_crossed.emit(i,anchor)
+	_check_relay_stations(current)
+
+
+func set_waypoint(world_pos: Vector3) -> bool:
+	var now: int = Time.get_ticks_msec()
+	var remaining_s := waypoint_cooldown_remaining(now)
+	if remaining_s > 0.0:
+		waypoint_request_result.emit(false, "cooldown", remaining_s)
+		return false
+	var requested := Vector3(world_pos.x, 0.0, world_pos.z)
+	var from_ship := requested - ship_position
+	from_ship.y = 0.0
+	var clamped_to_range := false
+	if from_ship.length() > waypoint_max_distance:
+		# 保留用户点击的方位，只把距离截到领航员当前允许的最远半径。
+		# 这样远处点击仍能快速表达方向，不会因为一次误差完全丢失操作。
+		requested = ship_position + from_ship.normalized() * waypoint_max_distance
+		requested.y = 0.0
+		clamped_to_range = true
+	var boundary := _boundary_belt()
+	if boundary != null and boundary.ellipse_factor(requested,boundary.inner_radius-6.0)>=1.0:
+		waypoint_request_result.emit(false,"boundary",0.0)
+		return false
+	waypoint = requested
 	has_waypoint = true
+	_last_waypoint_msec = now
 	waypoint_changed.emit(waypoint, true)
+	waypoint_request_result.emit(true, "clamped_range" if clamped_to_range else "accepted", 0.0)
+	return true
+
+
+## 星图每帧读取同一时钟，进度条和实际输入锁定不会发生漂移。
+func waypoint_cooldown_remaining(now_msec: int = -1) -> float:
+	if _last_waypoint_msec < 0:
+		return 0.0
+	var now := Time.get_ticks_msec() if now_msec < 0 else now_msec
+	var elapsed_s: float = float(now - _last_waypoint_msec) / 1000.0
+	return maxf(0.0,waypoint_cooldown_s-elapsed_s)
+
+
+func waypoint_cooldown_readiness(now_msec: int = -1) -> float:
+	if waypoint_cooldown_s <= 0.001:
+		return 1.0
+	return clampf(1.0-waypoint_cooldown_remaining(now_msec)/waypoint_cooldown_s,0.0,1.0)
+
+
+## 冷却中持续显示；完成后绿色提示两秒；从未使用或提示超时后完全隐藏。
+func waypoint_cooldown_display_state(now_msec: int = -1) -> String:
+	if _last_waypoint_msec < 0:
+		return "hidden"
+	var now := Time.get_ticks_msec() if now_msec < 0 else now_msec
+	var elapsed_s := float(now-_last_waypoint_msec)/1000.0
+	if elapsed_s < waypoint_cooldown_s:
+		return "cooling"
+	if elapsed_s < waypoint_cooldown_s+WAYPOINT_READY_NOTICE_S:
+		return "ready"
+	return "hidden"
 
 
 func clear_waypoint() -> void:
@@ -82,8 +275,91 @@ func clear_waypoint() -> void:
 func explode_ship() -> void:
 	if not ship_alive:
 		return
+	hull = 0.0
+	hull_changed.emit(hull)
 	ship_alive = false
 	ship_exploded.emit(ship_position)
+
+
+## 单次解体后的生命重置：保留本关计时、已触发事件和统计，只恢复飞船与航点。
+func _check_relay_stations(current: Vector3) -> void:
+	if current_sector == null:
+		return
+	for i: int in range(current_sector.relay_stations.size()):
+		if _reached_relays.has(i):
+			continue
+		var station: Vector3 = current_sector.relay_stations[i]
+		if current.distance_to(station) > RELAY_REACH_RADIUS:
+			continue
+		_reached_relays[i] = true
+		if i > last_relay_index:
+			last_relay_index = i
+		relay_station_reached.emit(i, station, relay_station_name(i))
+
+
+func is_relay_reached(index: int) -> bool:
+	return _reached_relays.has(index)
+
+
+func relay_station_name(index: int) -> String:
+	if current_sector == null:
+		return "中继站"
+	var count := current_sector.relay_stations.size()
+	if count <= 1:
+		return "中继站"
+	return "中继站 %s" % ("α" if index <= 0 else "β")
+
+
+func last_respawn_point() -> Dictionary:
+	if current_sector == null:
+		return {"position": Vector3.ZERO, "heading": 0.0, "index": -1, "name": "起点"}
+	if last_relay_index >= 0 and last_relay_index < current_sector.relay_stations.size():
+		var station: Vector3 = current_sector.relay_stations[last_relay_index]
+		return {
+			"position": station,
+			"heading": _heading_from(station),
+			"index": last_relay_index,
+			"name": relay_station_name(last_relay_index),
+		}
+	return {
+		"position": current_sector.spawn_position,
+		"heading": current_sector.spawn_heading,
+		"index": -1,
+		"name": "起点",
+	}
+
+
+func _heading_from(from: Vector3) -> float:
+	if current_sector == null or current_sector.route_checkpoints.size() < 2:
+		return current_sector.spawn_heading if current_sector != null else 0.0
+	var points := current_sector.route_checkpoints
+	var next_point := points[points.size() - 1]
+	for i: int in range(points.size() - 1):
+		if from.distance_to(points[i]) <= from.distance_to(points[i + 1]):
+			next_point = points[i + 1]
+			break
+	var direction := next_point - from
+	direction.y = 0.0
+	if direction.length_squared() <= 0.001:
+		return current_sector.spawn_heading
+	return atan2(-direction.x, -direction.z)
+
+
+func respawn_ship_at(checkpoint: Vector3,heading: float) -> void:
+	ship_position = Vector3(checkpoint.x,0.0,checkpoint.z)
+	ship_heading = heading
+	ship_velocity = Vector3.ZERO
+	ship_angular_velocity = 0.0
+	ship_speed = 0.0
+	throttle = 0.0
+	hull = MAX_HULL
+	boundary_proximity = 0.0
+	has_waypoint = false
+	ship_alive = true
+	_last_waypoint_msec = -1
+	hull_changed.emit(hull)
+	waypoint_changed.emit(waypoint,false)
+	ship_state_changed.emit(ship_position,ship_heading,ship_speed,throttle)
 
 
 func apply_hull_damage(amount: float) -> void:
@@ -118,24 +394,25 @@ func set_view_mode(mode: int) -> void:
 
 ## 星图用各向同性比例：1 世界单位 = 多少像素。取短边，保证圆还是圆。
 func map_pixels_per_unit(map_size: Vector2) -> float:
-	var span: float = world_half() * 2.0
+	var view_half: float = current_sector.map_view_half if current_sector != null else world_half()
+	var span: float = view_half * 2.0
 	if span < 0.001 or map_size.x < 1.0 or map_size.y < 1.0:
 		return 1.0
 	return minf(map_size.x, map_size.y) / span
 
 
-func world_to_map(world: Vector3, map_rect: Rect2) -> Vector2:
+func world_to_map(world: Vector3, map_rect: Rect2, focus: Vector3 = Vector3.ZERO) -> Vector2:
 	var scale_px: float = map_pixels_per_unit(map_rect.size)
 	var origin: Vector2 = map_rect.get_center()
-	return Vector2(origin.x + world.x * scale_px, origin.y + world.z * scale_px)
+	return Vector2(origin.x + (world.x - focus.x) * scale_px, origin.y + (world.z - focus.z) * scale_px)
 
 
-func map_to_world(map_pos: Vector2, map_rect: Rect2) -> Vector3:
+func map_to_world(map_pos: Vector2, map_rect: Rect2, focus: Vector3 = Vector3.ZERO) -> Vector3:
 	var scale_px: float = map_pixels_per_unit(map_rect.size)
 	if scale_px < 0.001:
 		return Vector3.ZERO
 	var origin: Vector2 = map_rect.get_center()
-	return Vector3((map_pos.x - origin.x) / scale_px, 0.0, (map_pos.y - origin.y) / scale_px)
+	return Vector3((map_pos.x - origin.x) / scale_px + focus.x, 0.0, (map_pos.y - origin.y) / scale_px + focus.z)
 
 
 func find_body(id: String) -> CelestialBodyData:
@@ -156,3 +433,10 @@ func objective_body() -> CelestialBodyData:
 	if current_sector == null:
 		return null
 	return find_body(current_sector.objective_body_id)
+
+
+func _boundary_belt() -> BeltData:
+	if current_sector == null: return null
+	for belt: BeltData in current_sector.belts:
+		if belt.is_boundary: return belt
+	return null

@@ -12,20 +12,25 @@ config_version=5
 
 config/name="DeepNav"
 config/description="双人双屏宇宙领航合作：领航员看大范围三维与全图，驾驶员从船内看整屏像素太空。"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/title_screen.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
 [autoload]
 
 Game="*res://scripts/game_state.gd"
+ExperimentLog="*res://scripts/experiment_log.gd"
+RawMice="*res://scripts/raw_mouse_input.gd"
+Displays="*res://scripts/display_coordinator.gd"
 
 [display]
 
 window/size/viewport_width=1920
 window/size/viewport_height=1080
+window/subwindows/embed_subwindows=false
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/per_pixel_transparency/allowed=true
 
 [dotnet]
 

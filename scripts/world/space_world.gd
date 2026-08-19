@@ -2,6 +2,8 @@ class_name SpaceWorld
 extends Node3D
 ## 共享的 3D 像素宇宙：大行星、小行星、飞船。
 
+var _sky_materials: Array[ShaderMaterial] = []
+
 
 func _ready() -> void:
 	_setup_environment()
@@ -9,6 +11,14 @@ func _ready() -> void:
 	_spawn_asteroids()
 	_spawn_ship()
 	add_child(WaypointBeacon.new())
+	_spawn_relay_stations()
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	var travel := Vector2(Game.ship_position.x, Game.ship_position.z) * 0.0014
+	for material: ShaderMaterial in _sky_materials:
+		material.set_shader_parameter("travel_offset", travel)
 
 
 func _setup_environment() -> void:
@@ -26,7 +36,7 @@ func _setup_environment() -> void:
 	world_env.environment = env
 	add_child(world_env)
 	# 一层很淡的大块明暗就够，第二层碎云会抢行星。
-	_spawn_sky_layer(3000.0, 0.48, 0.11, 0.0)
+	_spawn_sky_layer(3000.0, 0.48, 0.23, 0.0)
 	var stars := Node3D.new()
 	stars.name = "StarField"
 	stars.set_script(load("res://scripts/world/star_field.gd") as Script)
@@ -57,6 +67,7 @@ func _spawn_sky_layer(radius: float, noise_scale: float, dust_strength: float, l
 	sky_mat.set_shader_parameter("noise_scale", noise_scale)
 	sky_mat.set_shader_parameter("dust_strength", dust_strength)
 	sky_mat.set_shader_parameter("layer_offset", layer_offset)
+	_sky_materials.append(sky_mat)
 	sky_mat.render_priority = -128
 	mesh.material = sky_mat
 	var dome := MeshInstance3D.new()
@@ -100,3 +111,14 @@ func _spawn_ship() -> void:
 	var ship_scene: PackedScene = load("res://scenes/ship.tscn") as PackedScene
 	var ship: Node = ship_scene.instantiate()
 	add_child(ship)
+
+
+func _spawn_relay_stations() -> void:
+	if Game.current_sector == null:
+		return
+	var station_script := load("res://scripts/world/relay_station_3d.gd") as Script
+	for i: int in range(Game.current_sector.relay_stations.size()):
+		var station := Node3D.new()
+		station.set_script(station_script)
+		add_child(station)
+		station.call("setup", i, Game.current_sector.relay_stations[i])

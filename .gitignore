@@ -8,5 +8,8 @@ tmp_movie/
 input_probe_tmp.gd
 input_probe_tmp.gd.uid
 
+# 实机调试截图体积大、且含大量光标对齐探针；README 用图在 docs/readme/
+artifacts/runtime/
+
 .DS_Store
 **/.DS_Store

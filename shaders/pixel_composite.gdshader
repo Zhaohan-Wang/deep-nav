@@ -51,30 +51,33 @@ void fragment() {
 	vec4 src = texture(TEXTURE, uv);
 	if (src.a < 0.01) {
 		COLOR = vec4(0.0);
-		return;
+	} else {
+		vec3 col = src.rgb;
+
+		float luma = dot(col, vec3(0.299, 0.587, 0.114));
+		col = mix(vec3(luma), col, saturation);
+		col = (col - vec3(0.5)) * contrast + vec3(0.5);
+
+		float dither = (bayer4(snapped) - 0.5) * dither_strength;
+		col = clamp(col + vec3(dither), 0.0, 1.0);
+		col = floor(col * color_levels + 0.5) / color_levels;
+		col *= tint.rgb;
+		float vig = length(UV - vec2(0.5));
+		// 受击：中心微红 + 边缘重红。
+		vec3 hurt = vec3(0.72, 0.05, 0.08);
+		col = mix(col, hurt, hurt_flash * 0.28);
+		col = mix(col, hurt, hurt_flash * smoothstep(0.22, 0.78, vig) * 0.72);
+		// 接近警告：比受击窄一圈的橙红边缘，中心画面保持干净。
+		vec3 warn = vec3(0.86, 0.30, 0.10);
+		col = mix(col, warn, warn_pulse * smoothstep(0.30, 0.72, vig) * 0.85);
+		// 碰撞灯光：驾驶舱下沿与两侧先亮，保留中心可读性；随后由脚本快速衰减。
+		float lower_lamp = smoothstep(0.34, 0.98, UV.y);
+		float side_lamp = smoothstep(0.34, 0.72, abs(UV.x - 0.5));
+		float impact_lamp = 0.13 + lower_lamp * 0.34 + side_lamp * 0.12;
+		col += vec3(1.0, 0.58, 0.28) * light_flash * impact_lamp;
+		// 解体白屏：1.0 时纯白盖满，什么都看不见（曲线由脚本驱动）。
+		col = mix(col, vec3(1.0), clamp(death_flash, 0.0, 1.0));
+
+		COLOR = vec4(col, src.a);
 	}
-	vec3 col = src.rgb;
-
-	float luma = dot(col, vec3(0.299, 0.587, 0.114));
-	col = mix(vec3(luma), col, saturation);
-	col = (col - vec3(0.5)) * contrast + vec3(0.5);
-
-	float dither = (bayer4(snapped) - 0.5) * dither_strength;
-	col = clamp(col + vec3(dither), 0.0, 1.0);
-	col = floor(col * color_levels + 0.5) / color_levels;
-	col *= tint.rgb;
-	float vig = length(UV - vec2(0.5));
-	// 受击：中心微红 + 边缘重红。
-	vec3 hurt = vec3(0.72, 0.05, 0.08);
-	col = mix(col, hurt, hurt_flash * 0.28);
-	col = mix(col, hurt, hurt_flash * smoothstep(0.22, 0.78, vig) * 0.72);
-	// 接近警告：比受击窄一圈的橙红边缘，中心画面保持干净。
-	vec3 warn = vec3(0.86, 0.30, 0.10);
-	col = mix(col, warn, warn_pulse * smoothstep(0.30, 0.72, vig) * 0.85);
-	// 灯光过载：加法提亮，偏暖。
-	col += vec3(0.95, 0.62, 0.42) * light_flash * 0.30;
-	// 解体白屏：1.0 时纯白盖满，什么都看不见（曲线由脚本驱动）。
-	col = mix(col, vec3(1.0), clamp(death_flash, 0.0, 1.0));
-
-	COLOR = vec4(col, src.a);
 }

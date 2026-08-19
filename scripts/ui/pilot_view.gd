@@ -17,12 +17,14 @@ enum AlertKind {
 	IDLE,
 	PROXIMITY,
 	IMPACT,
+	RELAY,
 	DESTROYED,
 	ARRIVED,
 }
 
 ## 实际撞上后，警告再多停这一会儿，然后按距离决定是否收回。
 const IMPACT_HOLD: float = 1.6
+const RELAY_HOLD: float = 3.6
 ## 离致死行星表面多近开始亮「撞击警告」，带一点回差避免边缘闪烁。
 const PROXIMITY_WARN_DISTANCE: float = 14.0
 const PROXIMITY_ENTER: float = 0.28
@@ -37,6 +39,7 @@ var _range_label: Label
 var _hull_label: Label
 var _alert_kind: int = AlertKind.IDLE
 var _impact_hold: float = 0.0
+var _relay_hold: float = 0.0
 var _proximity_on: bool = false
 
 
@@ -49,6 +52,7 @@ func _ready() -> void:
 	Game.ship_hit.connect(_on_hit)
 	Game.ship_exploded.connect(_on_exploded)
 	Game.destination_reached.connect(_on_arrived)
+	Game.relay_station_reached.connect(_on_relay_reached)
 	_on_ship_state(Game.ship_position, Game.ship_heading, Game.ship_speed, Game.throttle)
 	_on_hull(Game.hull)
 
@@ -119,6 +123,8 @@ func _process(delta: float) -> void:
 		return
 	if _impact_hold > 0.0:
 		_impact_hold = maxf(0.0, _impact_hold - delta)
+	if _relay_hold > 0.0:
+		_relay_hold = maxf(0.0, _relay_hold - delta)
 	_refresh_alert()
 
 
@@ -129,6 +135,11 @@ func _refresh_alert() -> void:
 	var near: bool = _update_proximity()
 	if _impact_hold > 0.0:
 		_apply_alert(AlertKind.IMPACT, "撞击警告", "impact", UiStyle.DANGER)
+		return
+	if _relay_hold > 0.0:
+		return
+	if Game.boundary_proximity > 0.08:
+		_apply_alert(AlertKind.PROXIMITY, "边界排斥区 · 请返回航区", "impact", UiStyle.DANGER)
 		return
 	if near:
 		_apply_alert(AlertKind.PROXIMITY, "撞击警告", "impact", UiStyle.DANGER)
@@ -150,7 +161,7 @@ func _update_proximity() -> bool:
 func _proximity_factor() -> float:
 	if not Game.ship_alive or Game.mission_complete:
 		return 0.0
-	var worst: float = 0.0
+	var worst: float = Game.boundary_proximity
 	for body: CelestialBodyData in Game.celestial_bodies:
 		if body.kind == CelestialBodyData.Kind.DESTINATION:
 			continue
@@ -195,6 +206,13 @@ func _on_hit(_remaining: float) -> void:
 		return
 	_impact_hold = IMPACT_HOLD
 	_refresh_alert()
+
+
+func _on_relay_reached(_index: int, _position: Vector3, station_name: String) -> void:
+	if _alert_kind == AlertKind.ARRIVED or _alert_kind == AlertKind.DESTROYED:
+		return
+	_relay_hold = RELAY_HOLD
+	_apply_alert(AlertKind.RELAY, "已抵达%s" % station_name, "signal", UiStyle.CYAN)
 
 
 func _on_exploded(_pos: Vector3) -> void:

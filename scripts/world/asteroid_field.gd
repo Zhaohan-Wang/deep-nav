@@ -2,9 +2,8 @@ class_name AsteroidField
 extends Node3D
 ## 按 BeltData 生成有厚度的小行星带：航面稀疏挡路，上下铺开撑空间感。
 
+const Layout = preload("res://scripts/belt_layout.gd")
 const COLLISION_LAYER: int = 8
-## 石头碰撞球碰到这个高度带，才算挡飞船。
-const FLIGHT_HIT_SLAB: float = 2.8
 
 
 var _light_dir: Vector3 = Vector3(0.42, 0.62, 0.48)
@@ -17,70 +16,14 @@ func setup(belts: Array[BeltData], light_dir: Vector3) -> void:
 
 
 func _spawn_belt(belt: BeltData) -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = belt.seed_value
 	if belt.is_boundary:
 		# 连续椭圆墙负责真正挡住飞船；碎石只是外形，避免从缝里钻出去。
 		_spawn_boundary_wall(belt)
 
-	var span: float = _height_span(belt)
-	# 廊道要能穿，航面略密一点；环带和外墙把密度留给上下两层。
-	var mid_rock_ratio: float = 0.36 if belt.shape == BeltData.Shape.BAND else 0.20
-	var mid_debris_ratio: float = 0.20 if belt.shape == BeltData.Shape.BAND else 0.10
-	var mid_rocks: int = maxi(2, int(round(float(belt.rock_count) * mid_rock_ratio)))
-	var mid_debris: int = maxi(1, int(round(float(belt.debris_count) * mid_debris_ratio)))
-	var vol_rocks: int = maxi(0, belt.rock_count - mid_rocks)
-	var vol_debris: int = maxi(0, belt.debris_count - mid_debris)
-	# 石头变小后补一点碎石，带才不会空。
-	vol_debris += 32 if belt.is_boundary else 24
-
-	for i: int in range(mid_rocks):
-		var pos: Vector3 = belt.sample_xz(rng)
-		pos.y = _sample_mid_y(rng)
-		_spawn_rock(pos, _sample_radius(rng, 0.52, 1.12), rng, 14.0, belt.is_boundary)
-	for i: int in range(mid_debris):
-		var pos: Vector3 = belt.sample_xz(rng)
-		pos.y = _sample_mid_y(rng)
-		_spawn_rock(pos, _sample_radius(rng, 0.28, 0.56), rng, 8.0, belt.is_boundary)
-	for i: int in range(vol_rocks):
-		var pos: Vector3 = belt.sample_xz(rng)
-		pos.y = _sample_volume_y(rng, span)
-		_spawn_rock(pos, _sample_radius(rng, 0.38, 0.88), rng, 10.0, belt.is_boundary)
-	for i: int in range(vol_debris):
-		var pos: Vector3 = belt.sample_xz(rng)
-		pos.y = _sample_volume_y(rng, span)
-		_spawn_rock(pos, _sample_radius(rng, 0.16, 0.42), rng, 6.0, belt.is_boundary)
-
-
-func _height_span(belt: BeltData) -> float:
-	if belt.is_boundary:
-		return 28.0
-	if belt.shape == BeltData.Shape.BAND:
-		return 15.0
-	return 22.0
-
-
-## 多数偏小、偶尔略大，避免清一色，也避免长到行星那么大。
-func _sample_radius(rng: RandomNumberGenerator, radius_min: float, radius_max: float) -> float:
-	var t: float = rng.randf()
-	t = t * t
-	return lerpf(radius_min, radius_max, t)
-
-
-func _sample_mid_y(rng: RandomNumberGenerator) -> float:
-	# 高斯抖开，不要齐刷刷贴在 y=0 一条线上。
-	return clampf(rng.randfn(0.0, 0.95), -2.4, 2.4)
-
-
-func _sample_volume_y(rng: RandomNumberGenerator, span: float) -> float:
-	# 高斯铺成一团云，再把航面附近扔掉，避免又叠成一张饼。
-	var clear: float = 4.6
-	for _attempt: int in range(8):
-		var y: float = rng.randfn(0.0, span * 0.48)
-		y = clampf(y, -span * 1.25, span * 1.25)
-		if absf(y) >= clear:
-			return y
-	return span * 0.62 if rng.randf() < 0.5 else -span * 0.62
+	for sample: Dictionary in Layout.samples(belt):
+		var visual_rng: RandomNumberGenerator = Layout.visual_rng(belt,int(sample["index"]))
+		_spawn_rock(Vector3(sample["position"]),float(sample["radius"]),visual_rng,float(sample["damage"]),
+			belt.is_boundary,bool(sample["hits_flight"]),float(sample["hit_radius"]),belt.id,int(sample["index"]))
 
 
 func _pick_palette(rng: RandomNumberGenerator) -> Array[Color]:
@@ -110,7 +53,7 @@ func _spawn_boundary_wall(belt: BeltData) -> void:
 	wall.physics_material_override = bounce_mat
 	add_child(wall)
 
-	var segment_count: int = 56
+	var segment_count: int = belt.boundary_segment_count()
 	var thickness: float = maxf(belt.outer_radius - belt.inner_radius, 10.0)
 	var height: float = 12.0
 	for i: int in range(segment_count):
@@ -140,20 +83,45 @@ func _spawn_boundary_wall(belt: BeltData) -> void:
 		var basis := Basis(tangent, Vector3.UP, outward).orthonormalized()
 		col.transform = Transform3D(basis, mid + outward * (thickness * 0.5))
 		wall.add_child(col)
+	_spawn_boundary_field_visual(wall,belt,segment_count)
 
 
-func _spawn_rock(pos: Vector3, radius: float, rng: RandomNumberGenerator, damage: float, is_boundary: bool) -> void:
-	# 三轴只做轻微分歧，看起来仍是同一类碎石，而不是被拉扁的椭圆。
-	var sx: float = rng.randf_range(0.94, 1.06)
-	var sy: float = rng.randf_range(0.90, 1.04)
-	var sz: float = rng.randf_range(0.94, 1.06)
-	var hit_radius: float = radius * maxf(sx, sz) * 1.06
+func _spawn_boundary_field_visual(wall: StaticBody3D,belt: BeltData,segment_count: int) -> void:
+	# 连续碰撞不能藏在看似可钻的石缝里；淡红能量幕明确表示碎石带中的封锁场。
+	var surface:=SurfaceTool.new(); surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i: int in range(segment_count):
+		var p0:=belt.point_on_ring(TAU*float(i)/float(segment_count),belt.inner_radius)
+		var p1:=belt.point_on_ring(TAU*float(i+1)/float(segment_count),belt.inner_radius)
+		var a:=p0+Vector3.DOWN*5.5; var b:=p1+Vector3.DOWN*5.5
+		var c:=p1+Vector3.UP*5.5; var d:=p0+Vector3.UP*5.5
+		for vertex: Vector3 in [a,b,c,a,c,d]: surface.add_vertex(vertex)
+	var mesh:=surface.commit()
+	var material:=StandardMaterial3D.new()
+	material.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode=BaseMaterial3D.CULL_DISABLED
+	material.albedo_color=Color(0.72,0.18,0.22,0.075)
+	material.emission_enabled=true
+	material.emission=Color(0.55,0.08,0.12)
+	material.emission_energy_multiplier=0.28
+	var visual:=MeshInstance3D.new(); visual.name="BoundaryInterdictionField"
+	visual.mesh=mesh; visual.material_override=material
+	visual.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	wall.add_child(visual)
 
-	# 只有擦到航面的石头才挂碰撞；高/低的只做景深，避免镜头被头顶碎石顶住。
-	var hits_flight: bool = absf(pos.y) - hit_radius <= FLIGHT_HIT_SLAB
 
+func _spawn_rock(pos: Vector3, radius: float, rng: RandomNumberGenerator, damage: float,
+		is_boundary: bool,hits_flight: bool,hit_radius: float,belt_id: String,sample_index: int) -> void:
+	# 小行星不是行星：放开三轴差异与表面起伏，避免每颗都像规则圆球。
+	var sx: float = rng.randf_range(0.76, 1.26)
+	var sy: float = rng.randf_range(0.68, 1.18)
+	var sz: float = rng.randf_range(0.78, 1.30)
 	var root := Node3D.new()
 	root.position = pos
+	root.set_meta("belt_id",belt_id)
+	root.set_meta("sample_index",sample_index)
+	root.set_meta("hits_flight",hits_flight)
+	root.set_meta("hit_radius",hit_radius)
 	add_child(root)
 	if hits_flight:
 		var body := StaticBody3D.new()
@@ -177,8 +145,8 @@ func _spawn_rock(pos: Vector3, radius: float, rng: RandomNumberGenerator, damage
 	var mesh := SphereMesh.new()
 	mesh.radius = 1.0
 	mesh.height = 2.0
-	mesh.radial_segments = 8
-	mesh.rings = 6
+	mesh.radial_segments = 7
+	mesh.rings = 5
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://shaders/pixel_asteroid_3d.gdshader") as Shader
 	var palette: Array[Color] = _pick_palette(rng)
@@ -187,7 +155,7 @@ func _spawn_rock(pos: Vector3, radius: float, rng: RandomNumberGenerator, damage
 	mat.set_shader_parameter("col_shade", palette[2])
 	mat.set_shader_parameter("seed", rng.randf_range(1.1, 8.8))
 	mat.set_shader_parameter("pixels", clampf(radius * 22.0 + rng.randf_range(8.0, 14.0), 12.0, 28.0))
-	mat.set_shader_parameter("lump", rng.randf_range(0.07, 0.14))
+	mat.set_shader_parameter("lump", rng.randf_range(0.13, 0.27))
 	mat.set_shader_parameter("light_dir", _light_dir)
 	mesh.material = mat
 

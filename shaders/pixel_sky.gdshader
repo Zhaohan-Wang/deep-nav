@@ -1,12 +1,14 @@
 shader_type spatial;
 render_mode unshaded, cull_front, shadows_disabled, fog_disabled, specular_disabled, ambient_light_disabled;
 
-// 远景只做极弱的大块明暗，避免星云纹理抢行星和航道。
-uniform vec3 color_void : source_color = vec3(0.008, 0.009, 0.014);
-uniform vec3 color_dust : source_color = vec3(0.028, 0.034, 0.052);
-uniform float dust_strength : hint_range(0.0, 0.4) = 0.12;
+// 与星图同色的世界空间天幕；飞船位移通过 travel_offset 驱动缓慢视差。
+uniform vec3 color_void : source_color = vec3(0.004, 0.012, 0.028);
+uniform vec3 color_dust : source_color = vec3(0.022, 0.092, 0.155);
+uniform vec3 color_filament : source_color = vec3(0.022, 0.145, 0.165);
+uniform float dust_strength : hint_range(0.0, 0.4) = 0.24;
 uniform float noise_scale = 0.55;
 uniform float layer_offset = 0.0;
+uniform vec2 travel_offset = vec2(0.0);
 
 float hash21(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -26,14 +28,16 @@ float noise2(vec2 p) {
 void fragment() {
 	vec3 world_pos = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec3 dir = normalize(world_pos);
+	// 先量化方向再算纹理，远景也保留像素阶梯，而不是滑润的 3D 噪声。
+	dir = floor(dir * 260.0 + 0.5) / 260.0;
 
-	// 两层很大的噪声叠一下，只有缓缓的明暗，没有碎云。
-	vec2 uv = dir.xz * noise_scale + vec2(dir.y * 0.18 + layer_offset, layer_offset * 0.3);
-	float n = noise2(uv) * 0.72 + noise2(uv * 1.7 + vec2(2.1, 0.8)) * 0.28;
-	// 压成三档灰，看起来像淡像素底，而不是贴图。
-	float band = floor(n * 3.0 + 0.001) / 2.0;
-	float mask = smoothstep(0.22, 0.78, band) * dust_strength;
+	vec2 uv = dir.xz * noise_scale + vec2(dir.y * 0.26 + layer_offset, layer_offset * 0.3) + travel_offset * 0.22;
+	float n = noise2(uv) * 0.64 + noise2(uv * 1.83 + vec2(2.1, 0.8)) * 0.25 + noise2(uv * 3.1 - vec2(1.7, 2.4)) * 0.11;
+	float ridge = 1.0 - abs(noise2(uv * 1.28 + vec2(5.2, -3.1)) * 2.0 - 1.0);
+	float band = floor(n * 5.0 + 0.001) / 4.0;
+	float mask = 0.07 + smoothstep(0.25, 0.76, band) * dust_strength;
+	float filament = smoothstep(0.71, 0.92, ridge) * 0.075;
 
-	vec3 col = mix(color_void, color_dust, mask);
+	vec3 col = color_void + color_dust * mask + color_filament * filament;
 	ALBEDO = col;
 }

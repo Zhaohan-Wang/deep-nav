@@ -71,6 +71,7 @@ static func make_sector_01() -> SectorData:
 	wall.debris_count = 52
 	wall.seed_value = 6203
 	wall.is_boundary = true
+	wall.boundary_exponent = 6.0
 
 	sector.belts = [gate_belt, ring_belt, wall]
 	return sector

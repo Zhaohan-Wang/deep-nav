@@ -9,6 +9,13 @@ var _ship_icon: Sprite2D
 var _engine_icon: Sprite2D
 var _map_rect: Rect2 = Rect2()
 var _overlay: Control
+var _grid_material: ShaderMaterial
+var _space_material: ShaderMaterial
+var _focus_world: Vector3 = Vector3.ZERO
+var _target_focus_world: Vector3 = Vector3.ZERO
+## 自动全景截图专用；正常游戏始终关闭。
+var fixed_focus_enabled: bool = false
+var fixed_focus_world: Vector3 = Vector3.ZERO
 
 
 func _ready() -> void:
@@ -18,39 +25,38 @@ func _ready() -> void:
 	Game.ship_state_changed.connect(_on_ship_state)
 	Game.waypoint_changed.connect(_on_waypoint_changed)
 	resized.connect(_relayout)
+	set_process(true)
+	_focus_world = fixed_focus_world if fixed_focus_enabled else _desired_focus(Game.ship_position)
+	_target_focus_world = _focus_world
 	_relayout()
 	_on_ship_state(Game.ship_position, Game.ship_heading, Game.ship_speed, Game.throttle)
 	_on_waypoint_changed(Game.waypoint, Game.has_waypoint)
 
 
-func _build_layers() -> void:
-	var back := TextureRect.new()
-	back.texture = load("res://assets/backgrounds/blue-back.png") as Texture2D
-	back.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	back.stretch_mode = TextureRect.STRETCH_SCALE
-	back.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	# 压暗底图，星云不能抢过图上的行星和标记。
-	back.modulate = Color(0.50, 0.52, 0.60)
-	back.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(back)
+func _process(delta: float) -> void:
+	var follow: float = 1.0 - exp(-delta * 4.2)
+	if _focus_world.distance_squared_to(_target_focus_world) > 0.001:
+		_focus_world = _focus_world.lerp(_target_focus_world, follow)
+		_position_world_items()
 
-	var stars := TextureRect.new()
-	stars.texture = load("res://assets/backgrounds/blue-stars.png") as Texture2D
-	stars.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	stars.stretch_mode = TextureRect.STRETCH_SCALE
-	stars.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	stars.modulate = Color(1.0, 1.0, 1.0, 0.45)
-	stars.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stars.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(stars)
+
+func _build_layers() -> void:
+	# 不再拉伸一张固定星云图。程序背景读取世界坐标，星点、尘云与远景以不同视差跟随地图。
+	var space := ColorRect.new()
+	space.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	space.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_space_material = ShaderMaterial.new()
+	_space_material.shader = load("res://shaders/pixel_space_map.gdshader") as Shader
+	space.material = _space_material
+	space.color = Color.WHITE
+	add_child(space)
 
 	var grid := ColorRect.new()
 	grid.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var grid_mat := ShaderMaterial.new()
-	grid_mat.shader = load("res://shaders/map_panel.gdshader") as Shader
-	grid.material = grid_mat
+	_grid_material = ShaderMaterial.new()
+	_grid_material.shader = load("res://shaders/map_panel.gdshader") as Shader
+	grid.material = _grid_material
 	grid.color = Color(1.0, 1.0, 1.0, 1.0)
 	add_child(grid)
 
@@ -58,7 +64,6 @@ func _build_layers() -> void:
 	_bodies_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_bodies_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_bodies_layer)
-	_spawn_planets()
 
 	var overlay := Control.new()
 	overlay.set_script(load("res://scripts/ui/sector_map_overlay.gd") as Script)
@@ -67,16 +72,18 @@ func _build_layers() -> void:
 	add_child(overlay)
 	_overlay = overlay
 
+	_spawn_planets()
+
 	_engine_icon = Sprite2D.new()
-	_engine_icon.texture = load("res://assets/ships/engine/Scout.png") as Texture2D
-	_engine_icon.hframes = 10
+	_engine_icon.name = "EngineIcon"
 	_engine_icon.centered = true
 	_engine_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_engine_icon.visible = false
 	add_child(_engine_icon)
 
 	_ship_icon = Sprite2D.new()
-	_ship_icon.texture = load("res://assets/ships/base/Scout.png") as Texture2D
+	_ship_icon.name = "ShipIcon"
+	_ship_icon.texture = load("res://assets/ships/deep_nav_ship.png") as Texture2D
 	_ship_icon.centered = true
 	_ship_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_child(_ship_icon)
@@ -105,6 +112,12 @@ func _relayout() -> void:
 	_map_rect = Rect2(Vector2.ZERO, size)
 	var scale_px: float = Game.map_pixels_per_unit(_map_rect.size)
 	_fit_ship_icon(scale_px)
+	_update_grid(scale_px)
+	_position_world_items()
+
+
+func _position_world_items() -> void:
+	var scale_px: float = Game.map_pixels_per_unit(_map_rect.size)
 	for host: Node in _bodies_layer.get_children():
 		if not (host is Control):
 			continue
@@ -123,30 +136,66 @@ func _relayout() -> void:
 		var pos: Vector2 = world_to_map(data.world_position)
 		var drawn: Vector2 = ctrl.size * ctrl.scale
 		ctrl.position = pos - drawn * 0.5
+	var ship_pos := world_to_map(Game.ship_position)
+	_ship_icon.position = ship_pos
+	_engine_icon.position = ship_pos
 	if _overlay != null:
 		_overlay.queue_redraw()
+	_update_grid(scale_px)
+
+
+func _update_grid(scale_px: float) -> void:
+	if _grid_material == null or size.x < 1.0 or size.y < 1.0:
+		return
+	var world_step: float = 10.0
+	var grid_px: float = scale_px * world_step
+	# 小窗里不让网格过密，但每格仍是真实的整数世界距离。
+	if grid_px < 34.0:
+		world_step = 20.0
+		grid_px = scale_px * world_step
+	var world_origin := _map_rect.get_center() - Vector2(_focus_world.x, _focus_world.z) * scale_px
+	_grid_material.set_shader_parameter("canvas_size", size)
+	_grid_material.set_shader_parameter("grid_size_px", grid_px)
+	_grid_material.set_shader_parameter("grid_origin_px", world_origin)
+	if _space_material != null:
+		_space_material.set_shader_parameter("canvas_size", size)
+		_space_material.set_shader_parameter("focus_world", Vector2(_focus_world.x, _focus_world.z))
+		_space_material.set_shader_parameter("pixels_per_unit", scale_px)
+		_space_material.set_shader_parameter("pixel_block", 3.0 if size.y >= 650.0 else 2.0)
 
 
 func _fit_ship_icon(_scale_px: float) -> void:
 	# 星图飞船是领航符号，不能按 1.2 世界单位去缩，否则会变成一条线。
 	if _ship_icon.texture == null:
 		return
-	var tex_w: float = float(_ship_icon.texture.get_width())
-	var ship_px: float = 42.0
-	var zoom: float = ship_px / maxf(tex_w, 1.0)
+	var tex_extent: float = maxf(float(_ship_icon.texture.get_width()),float(_ship_icon.texture.get_height()))
+	# 新船主体在透明画布中的占比很高；30px 足够辨认，又不会盖住雷达环和附近天体。
+	var ship_px: float = 30.0
+	var zoom: float = ship_px/maxf(tex_extent,1.0)
 	_ship_icon.scale = Vector2(zoom, zoom)
-	if _engine_icon.texture != null:
-		var frame_w: float = float(_engine_icon.texture.get_width()) / maxf(float(_engine_icon.hframes), 1.0)
-		var engine_zoom: float = ship_px / maxf(frame_w, 1.0)
-		_engine_icon.scale = Vector2(engine_zoom, engine_zoom)
 
 
 func world_to_map(world: Vector3) -> Vector2:
-	return Game.world_to_map(world, _map_rect)
+	return Game.world_to_map(world, _map_rect, _focus_world)
 
 
 func map_to_world(map_pos: Vector2) -> Vector3:
-	return Game.map_to_world(map_pos, _map_rect)
+	return Game.map_to_world(map_pos, _map_rect, _focus_world)
+
+
+func pixels_per_unit() -> float:
+	return Game.map_pixels_per_unit(_map_rect.size)
+
+
+func _desired_focus(ship_pos: Vector3) -> Vector3:
+	var dest := Game.objective_body()
+	if dest == null or Game.current_sector == null:
+		return ship_pos
+	var ahead := dest.world_position - ship_pos
+	ahead.y = 0.0
+	if ahead.length_squared() > 0.001:
+		ahead = ahead.normalized() * Game.current_sector.map_view_half * 0.24
+	return ship_pos + ahead
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -158,16 +207,15 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _on_ship_state(position: Vector3, heading: float, _speed: float, throttle: float) -> void:
+	_target_focus_world = fixed_focus_world if fixed_focus_enabled else _desired_focus(position)
 	var pos: Vector2 = world_to_map(position)
 	_ship_icon.position = pos
 	_engine_icon.position = pos
 	# 3D 航向 0 朝向 -Z（地图上方），2D 正旋转为顺时针，所以取反。
 	_ship_icon.rotation = -heading
 	_engine_icon.rotation = -heading
-	var thrusting: bool = throttle > 0.12
-	_engine_icon.visible = thrusting
-	if thrusting:
-		_engine_icon.frame = int(Time.get_ticks_msec() / 80) % 10
+	# 旧 Scout 的发动机序列与新船轮廓不一致，先禁用，避免推进时闪回旧飞船。
+	_engine_icon.visible = false
 	if _overlay != null:
 		_overlay.queue_redraw()
 

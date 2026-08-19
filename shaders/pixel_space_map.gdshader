@@ -1,17 +1,24 @@
 shader_type canvas_item;
 render_mode unshaded, blend_mix;
-#include "res://shaders/star_lib.gdshaderinc"
 
-// 扇区全图的暗太空：星云 + 与视口相同的像素星星形状（只是更大）。
-uniform vec3 color_base : source_color = vec3(0.018, 0.022, 0.042);
-uniform vec3 nebula_cool : source_color = vec3(0.07, 0.11, 0.20);
-uniform vec3 nebula_warm : source_color = vec3(0.12, 0.04, 0.10);
-uniform float darken : hint_range(0.0, 1.0) = 0.52;
-uniform float star_cell : hint_range(6.0, 40.0) = 12.0;
-uniform float star_pixel : hint_range(1.0, 8.0) = 2.2;
-uniform vec4 grid_color : source_color = vec4(0.16, 0.42, 0.46, 0.12);
-uniform float cells = 10.0;
-uniform float line_width = 0.007;
+// 体积折叠思路参考 Star Nest (Pablo Roman Andrioli, MIT, Shadertoy XlfGRj)。
+// 这里重写为世界坐标的低成本、低饱和像素背景，不复制原作的屏幕中心漩涡。
+uniform vec2 canvas_size = vec2(1920.0, 1080.0);
+uniform vec2 focus_world = vec2(0.0);
+uniform float pixels_per_unit = 5.0;
+uniform float pixel_block : hint_range(1.0, 6.0) = 3.0;
+uniform vec3 color_void : source_color = vec3(0.004, 0.012, 0.028);
+uniform vec3 color_blue : source_color = vec3(0.022, 0.092, 0.155);
+uniform vec3 color_cyan : source_color = vec3(0.022, 0.145, 0.165);
+uniform vec3 color_amber : source_color = vec3(0.105, 0.067, 0.032);
+
+float hash21(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+vec2 hash22(vec2 p) {
+	return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453123);
+}
 
 float noise2(vec2 p) {
 	vec2 i = floor(p);
@@ -25,62 +32,71 @@ float noise2(vec2 p) {
 }
 
 float fbm(vec2 p) {
-	float v = 0.0;
-	float a = 0.5;
+	float sum = 0.0;
+	float amp = 0.52;
 	for (int i = 0; i < 4; i++) {
-		v += noise2(p) * a;
-		p *= 2.04;
-		a *= 0.5;
+		sum += noise2(p) * amp;
+		p = mat2(vec2(0.82, 0.57), vec2(-0.57, 0.82)) * p * 2.03 + vec2(1.7, -0.8);
+		amp *= 0.48;
 	}
-	return v;
+	return sum;
 }
 
-float collect_stars(vec2 sph, float threshold, float pixel_size) {
-	vec2 cell = floor(sph);
-	float acc = 0.0;
-	for (int y = -1; y <= 1; y++) {
-		for (int x = -1; x <= 1; x++) {
-			vec2 ncell = cell + vec2(float(x), float(y));
-			float h = hash21(ncell + vec2(28.0, 17.0));
-			if (h < threshold) {
-				continue;
-			}
-			int shape = star_pick_shape(hash22(ncell));
-			vec2 center = ncell + vec2(0.5);
-			vec2 local_px = (sph - center) * pixel_size;
-			float m = star_mask(local_px, shape);
-			float bright = 0.55 + hash22(ncell.yx) * 0.45;
-			acc = max(acc, m * bright);
-		}
+float folded_filament(vec2 p) {
+	vec3 q = vec3(p * 0.32, 0.73);
+	float previous = 0.0;
+	float activity = 0.0;
+	for (int i = 0; i < 6; i++) {
+		q = abs(q) / max(dot(q, q), 0.18) - 0.53;
+		float current = length(q);
+		activity += abs(current - previous);
+		previous = current;
 	}
-	return acc;
+	return smoothstep(4.5, 7.8, activity);
+}
+
+float pixel_star(vec2 world, float cell_size, float threshold) {
+	vec2 cell = floor(world / cell_size);
+	float seed = hash21(cell + vec2(19.0, 43.0));
+	if (seed < threshold) {
+		return 0.0;
+	}
+	vec2 center = (hash22(cell) * 0.62 + 0.19);
+	// 星核始终只占一个像素采样块；不能随星格间距一起膨胀成十字路障。
+	vec2 local_blocks = (fract(world / cell_size) - center) * cell_size * pixels_per_unit / max(pixel_block, 1.0);
+	float core = 1.0 - step(0.58, max(abs(local_blocks.x), abs(local_blocks.y)));
+	float cross_h = (1.0 - step(0.48, abs(local_blocks.y))) * (1.0 - step(2.15, abs(local_blocks.x)));
+	float cross_v = (1.0 - step(0.48, abs(local_blocks.x))) * (1.0 - step(2.15, abs(local_blocks.y)));
+	return max(core, max(cross_h, cross_v) * step(0.985, seed));
 }
 
 void fragment() {
-	vec2 uv = UV;
-	vec3 col = color_base;
-	float cloud_a = fbm(uv * 3.0);
-	float cloud_b = fbm(uv * 4.8 + vec2(2.4, 0.8));
-	col += nebula_cool * smoothstep(0.46, 0.74, cloud_a) * 0.11;
-	col += nebula_warm * smoothstep(0.52, 0.80, cloud_b) * 0.08;
-	col *= 1.0 - darken;
+	vec2 sampled_pixel = (floor(UV * canvas_size / pixel_block) + 0.5) * pixel_block;
+	vec2 screen_world = (sampled_pixel - canvas_size * 0.5) / max(pixels_per_unit, 0.01);
+	vec2 world = focus_world + screen_world;
 
-	vec2 sph_far = uv * vec2(star_cell * 1.7, star_cell);
-	vec2 sph_mid = uv * vec2(star_cell * 0.9, star_cell * 0.58);
-	vec2 sph_near = uv * vec2(star_cell * 0.42, star_cell * 0.28);
-	float far_s = collect_stars(sph_far, 0.955, star_pixel * 1.15);
-	float mid_s = collect_stars(sph_mid, 0.974, star_pixel);
-	float near_s = collect_stars(sph_near, 0.990, star_pixel * 0.72);
-	vec3 far_t = star_tint_from(hash22(floor(sph_far)));
-	vec3 mid_t = star_tint_from(hash21(floor(sph_mid)));
-	vec3 near_t = star_tint_from(hash22(floor(sph_near) + 3.0));
-	col += far_t * far_s * 0.65;
-	col += mid_t * mid_s * 0.95;
-	col += near_t * near_s * 1.15;
+	// 三个层次分别只跟随 16% / 34% / 100% 的世界位移，自然产生视差。
+	vec2 far_world = screen_world + focus_world * 0.16;
+	vec2 mid_world = screen_world + focus_world * 0.34;
+	vec2 domain = far_world * 0.0062;
+	vec2 warp = vec2(fbm(domain + vec2(4.1, 1.3)), fbm(domain + vec2(-2.7, 6.4))) - 0.5;
+	float cloud = fbm(domain + warp * 1.45);
+	float cloud_detail = fbm(mid_world * 0.0105 + warp * 0.82 + vec2(7.2, -3.1));
+	float filament = folded_filament(mid_world * 0.0038 + warp * 0.4);
 
-	vec2 grid = abs(fract(uv * cells) - 0.5);
-	float line = 1.0 - step(line_width, min(grid.x, grid.y));
-	col = mix(col, grid_color.rgb, line * grid_color.a);
+	float broad_cloud = fbm(far_world * 0.0031 + vec2(-8.4, 3.7));
+	vec3 col = color_void + color_blue * (0.10 + smoothstep(0.27, 0.68, cloud) * 0.58);
+	col += color_cyan * smoothstep(0.40, 0.74, cloud_detail) * 0.25;
+	col += color_blue * smoothstep(0.36, 0.72, broad_cloud) * 0.18;
+	col += color_amber * smoothstep(0.58, 0.84, cloud + cloud_detail * 0.25) * 0.10;
+	col += mix(color_blue, color_cyan, cloud_detail) * filament * 0.055;
+
+	float stars_far = pixel_star(far_world, 16.0, 0.77);
+	float stars_mid = pixel_star(mid_world + vec2(240.0, -170.0), 28.0, 0.88);
+	float stars_near = pixel_star(world + vec2(-410.0, 90.0), 52.0, 0.955);
+	col += vec3(0.42, 0.58, 0.68) * stars_far * 0.42;
+	col += vec3(0.56, 0.78, 0.82) * stars_mid * 0.68;
+	col += vec3(0.92, 0.76, 0.52) * stars_near * 0.82;
 
 	COLOR = vec4(col, 1.0);
 }

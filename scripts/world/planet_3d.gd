@@ -2,14 +2,18 @@ class_name Planet3D
 extends Node3D
 ## 把 2D PixelPlanets 原样画进视口，再作为 3D 广告牌。材质与星图同一套。
 
+const SphericalProjection = preload("res://scripts/world/spherical_billboard_projection.gd")
+
 var data: CelestialBodyData
 var _planet: Control
 var _viewport: SubViewport
 var _sprite: Sprite3D
+var _physical_radius: float
 
 
 func setup(body: CelestialBodyData) -> void:
 	data = body
+	_physical_radius = body.world_radius
 	name = body.id
 	# 大行星贴在飞船航道水平面上，不抬高度，镜头才能正对看见。
 	global_position = Vector3(body.world_position.x, 0.0, body.world_position.z)
@@ -45,6 +49,7 @@ func setup(body: CelestialBodyData) -> void:
 	_sprite.double_sided = true
 	_sprite.centered = true
 	add_child(_sprite)
+	_update_spherical_projection()
 
 	_build_collision(body)
 	if body.visual == "star":
@@ -53,6 +58,23 @@ func setup(body: CelestialBodyData) -> void:
 		light.light_energy = 2.4
 		light.omni_range = body.world_radius * 18.0
 		add_child(light)
+
+
+func _process(_delta: float) -> void:
+	_update_spherical_projection()
+
+
+func _update_spherical_projection() -> void:
+	if _sprite == null or _physical_radius <= 0.0:
+		return
+	# 飞船驾驶员的相机与飞船中心几乎重合。碰撞球保证正常游戏中 d > r；
+	# 这里的最小正数只防止传送/重置同一帧产生除零，不参与正常视觉曲线。
+	var center_distance := global_position.distance_to(Game.ship_position)
+	var valid_distance := maxf(center_distance, _physical_radius + 0.001)
+	var projection_scale := SphericalProjection.scale_factor(
+		_physical_radius, valid_distance
+	)
+	_sprite.scale = Vector3.ONE * projection_scale
 
 
 func apply_star_light(star_pos: Vector3) -> void:

@@ -1,0 +1,33 @@
+#!/bin/zsh
+set -e
+
+# Godot 的 macOS 可执行文件依赖 .app 内部路径；通过普通符号链接启动时，
+# 部分系统服务会把它当成脱离 bundle 的程序。用 exec 保留真实绝对路径。
+
+candidates=()
+if [[ -n "${GODOT_BIN:-}" ]]; then
+	candidates+=("$GODOT_BIN")
+fi
+candidates+=(
+	"/Applications/Godot_mono.app/Contents/MacOS/Godot"
+	"/Applications/Godot.app/Contents/MacOS/Godot"
+	"$HOME/Downloads/Godot_mono.app/Contents/MacOS/Godot"
+	"$HOME/Downloads/Godot.app/Contents/MacOS/Godot"
+)
+
+GODOT_APP_BIN=""
+for candidate in "${candidates[@]}"; do
+	if [[ -x "$candidate" ]]; then
+		GODOT_APP_BIN="$candidate"
+		break
+	fi
+done
+
+if [[ -z "$GODOT_APP_BIN" ]]; then
+	print -u2 "Godot executable not found."
+	print -u2 "Set GODOT_BIN to the executable inside Godot.app, for example:"
+	print -u2 '  export GODOT_BIN="/Applications/Godot_mono.app/Contents/MacOS/Godot"'
+	exit 127
+fi
+
+exec "$GODOT_APP_BIN" "$@"

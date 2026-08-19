@@ -84,7 +84,7 @@ func _add_mesh(parent: Node3D, mesh: Mesh, color: Color, pos: Vector3) -> MeshIn
 func _process(delta: float) -> void:
 	# 前推 = 油门正向；左转输入为正，杆向左倾。
 	var throttle: float = Game.throttle
-	var turn: float = Input.get_axis("turn_right", "turn_left")
+	var turn: float = Displays.pilot_turn_axis()
 	var target := Vector3(-throttle * MAX_PITCH, 0.0, turn * MAX_ROLL)
 	var weight: float = 1.0 - exp(-delta * FOLLOW)
 	_pivot.rotation = _pivot.rotation.lerp(target, weight)
