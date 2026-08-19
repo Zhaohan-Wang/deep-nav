@@ -8,16 +8,17 @@
 
 标题页打开 **实验模式** 后，同一套流程会按会话写原始日志，方便现场采集。
 
-<p align="center">
-  <img src="docs/readme/gameplay.jpg" alt="领航员星图与驾驶员驾驶舱分屏" width="920">
-</p>
+| 领航员屏 | 驾驶员屏 |
+| :---: | :---: |
+| <img src="docs/readme/navigator.jpg" alt="领航员屏幕：三维窗外叠星图" width="440"> | <img src="docs/readme/pilot.jpg" alt="驾驶员屏幕：驾驶舱与仪表台" width="440"> |
+| 看窗外三维与星图，点击投放航点 | 看驾驶舱与仪表，按 `W A S D` 执行机动 |
 
 ## 玩法
 
 | 席位 | 看什么 | 做什么 |
 | --- | --- | --- |
-| **领航员** | 大范围星图与航线 | 在地图上点击放置航点，规划绕行与恢复 |
-| **驾驶员** | 船内第一人称像素太空 | `W A S D` 推进、刹车、转向，跟随航点飞行 |
+| **领航员** | 大范围三维窗外，底下叠一块星图 | 在星图上点击放置航点，规划绕行与恢复 |
+| **驾驶员** | 船内第一人称驾驶舱 | `W A S D` 推进、刹车、转向，跟随航点飞行 |
 
 启动后两只物理鼠标分别控制席位 A / 席位 B 的虚拟光标。岗位由任务开始前的认领决定：谁点了领航员卡，谁的屏幕就显示星图。
 
@@ -50,17 +51,15 @@
 
 ## 五关
 
-每关只练一件协作问题。训练关短、开阔、不设中继站；后面四关按阶段横向展开，16:9 只是一次可见范围，不是整张地图。
+每关只练一件协作问题。训练关短、开阔、不设中继站；后面四关按阶段横向展开，16:9 只是一次可见范围，不是整张地图。左边是关卡概念图，右边是玩家实际看到的全图星图。
 
-| 训练航道 | 织环航道 | 折光走廊 |
+| 关卡 | 概念图 | 实际星图 |
 | :---: | :---: | :---: |
-| <img src="docs/readme/mission_practice.jpg" alt="训练航道首图" width="280"> | <img src="docs/readme/mission_level_1.jpg" alt="织环航道首图" width="280"> | <img src="docs/readme/mission_level_2.jpg" alt="折光走廊首图" width="280"> |
-| 建立分工：短航点、冷却、跟随 | 开阔进场后绕过单一环带 | 两段错位碎石门，减速再转向 |
-
-| 寂井侧翼 | 潮汐远航 |
-| :---: | :---: |
-| <img src="docs/readme/mission_level_3.jpg" alt="寂井侧翼首图" width="280"> | <img src="docs/readme/mission_level_4.jpg" alt="潮汐远航首图" width="280"> |
-| 单一校准走廊，导航读数可能异常 | 先建立稳定节奏，再在剪切后恢复 |
+| **00 训练航道**<br>建立分工：短航点、冷却、跟随 | <img src="docs/readme/mission_practice.jpg" alt="训练航道概念图" width="280"> | <img src="docs/readme/map_practice.jpg" alt="训练航道星图" width="280"> |
+| **01 织环航道**<br>开阔进场后绕过单一环带 | <img src="docs/readme/mission_level_1.jpg" alt="织环航道概念图" width="280"> | <img src="docs/readme/map_level_1.jpg" alt="织环航道星图" width="280"> |
+| **02 折光走廊**<br>两段错位碎石门，减速再转向 | <img src="docs/readme/mission_level_2.jpg" alt="折光走廊概念图" width="280"> | <img src="docs/readme/map_level_2.jpg" alt="折光走廊星图" width="280"> |
+| **03 寂井侧翼**<br>单一校准走廊，导航读数可能异常 | <img src="docs/readme/mission_level_3.jpg" alt="寂井侧翼概念图" width="280"> | <img src="docs/readme/map_level_3.jpg" alt="寂井侧翼星图" width="280"> |
+| **04 潮汐远航**<br>先建立稳定节奏，再在剪切后恢复 | <img src="docs/readme/mission_level_4.jpg" alt="潮汐远航概念图" width="280"> | <img src="docs/readme/map_level_4.jpg" alt="潮汐远航星图" width="280"> |
 
 关卡设计理由、边界规则和小行星带不可直穿的检查见 [关卡设计](docs/mission_design.md)。审核路线只画在 `artifacts/maps/` 的开发图里，实验界面不会展示。
 
