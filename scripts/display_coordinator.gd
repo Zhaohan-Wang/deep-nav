@@ -60,6 +60,7 @@ var _raw_mouse_mode: bool = false
 var _raw_status: String = "正在等待两只外接鼠标"
 var _primary_role: int = Role.NAVIGATOR
 var _transparent_system_cursor: Texture2D
+var _cursors_placed: bool = false
 
 
 func _ready() -> void:
@@ -81,6 +82,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _shared_mode and not _cursors_placed:
+		_center_shared_cursors()
 	_enforce_cursor_policy()
 	_display_recheck_elapsed += delta
 	if _display_recheck_elapsed >= DISPLAY_RECHECK_SECONDS:
@@ -202,6 +205,9 @@ func _finish_startup() -> void:
 	_mirror_texture.texture = get_tree().root.get_texture()
 	_layout_windows()
 	_center_shared_cursors()
+	# RawMice 比 Displays 更早加载。即使设备消息在本节点接好信号前已经到达，
+	# 也必须从单例当前状态恢复双鼠标模式，不能退回 macOS 合并指针。
+	_sync_raw_mouse_state()
 	# 守卫：直接以任务场景启动时，主场景的 show_role_page 可能已先执行；不得踩回共用页。
 	if _shared_mode:
 		show_shared_page()
@@ -296,7 +302,10 @@ func show_shared_page() -> void:
 		_role_host.visible = false
 	_refresh_cursor_visibility()
 	_refresh_pointer_hint()
-	_update_shared_cursors()
+	if not _cursors_placed:
+		_center_shared_cursors()
+	else:
+		_update_shared_cursors()
 
 
 func show_role_page(content: Control) -> Window:
@@ -521,8 +530,11 @@ func _clamp_to_root(position: Vector2) -> Vector2:
 
 func _center_shared_cursors() -> void:
 	var bounds := get_tree().root.get_visible_rect().size
+	if bounds.x <= 2.0 or bounds.y <= 2.0:
+		return
 	_seat_a_pos = bounds * Vector2(0.42, 0.5)
 	_seat_b_pos = bounds * Vector2(0.58, 0.5)
+	_cursors_placed = true
 	_update_shared_cursors()
 
 
@@ -569,11 +581,14 @@ func _on_raw_mouse_motion(slot: int, delta: Vector2) -> void:
 	if _shared_mode:
 		if slot == 0:
 			_seat_a_pos = _clamp_to_root(_seat_a_pos + delta)
-			_push_motion(get_tree().root, PRIMARY_SEAT_POINTER_DEVICE, _seat_a_pos, delta)
 		else:
 			_seat_b_pos = _clamp_to_root(_seat_b_pos + delta)
-			_push_motion(get_tree().root, SECONDARY_SEAT_POINTER_DEVICE, _seat_b_pos, delta)
+		# 先画光标，再注入 GUI；即使后续 hover 查询失败，也不能中断任一席位的光标刷新。
 		_update_shared_cursors()
+		if slot == 0:
+			_push_motion(get_tree().root, PRIMARY_SEAT_POINTER_DEVICE, _seat_a_pos, delta)
+		else:
+			_push_motion(get_tree().root, SECONDARY_SEAT_POINTER_DEVICE, _seat_b_pos, delta)
 	elif slot == 0:
 		_seat_a_pos = _clamp_to_root(_seat_a_pos + delta)
 		_update_role_cursors()
@@ -625,7 +640,11 @@ func _push_seat_button(slot: int, button_index: MouseButton, pressed: bool, fact
 
 
 func _on_raw_mouse_device_changed(_slot: int, _connected: bool, _product: String) -> void:
-	_raw_mouse_mode = RawMice.connected_mouse_count() >= 2
+	_sync_raw_mouse_state()
+
+
+func _sync_raw_mouse_state() -> void:
+	_raw_mouse_mode = RawMice.is_ready() and RawMice.connected_mouse_count() >= 2
 	if _raw_mouse_mode:
 		_raw_status = "鼠标 A %s · 鼠标 B %s · %s · F6 只校正鼠标" % [
 			RawMice.device_name(0),RawMice.device_name(1),_keyboard_status(),
@@ -653,10 +672,14 @@ func _keyboard_status() -> String:
 
 func _on_raw_mouse_bridge_status(ready: bool, message: String) -> void:
 	_raw_status = message
-	if not ready:
+	if ready:
+		_sync_raw_mouse_state()
+	else:
 		_raw_mouse_mode = false
-	_refresh_cursor_visibility()
-	_refresh_pointer_hint()
+		seat_hover_changed.emit(0, null)
+		seat_hover_changed.emit(1, null)
+		_refresh_cursor_visibility()
+		_refresh_pointer_hint()
 
 
 func _refresh_cursor_visibility() -> void:

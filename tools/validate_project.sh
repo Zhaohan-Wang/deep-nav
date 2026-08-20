@@ -44,6 +44,7 @@ print "DEEP_NAV_VALIDATION_OK"
 "$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/session_progress_test.gd >>"$RUN_LOG" 2>&1
 "$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/experiment_pipeline_test.gd >>"$RUN_LOG" 2>&1
 "$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/menu_input_test.gd >>"$RUN_LOG" 2>&1
+"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/raw_mouse_separation_test.gd >>"$RUN_LOG" 2>&1
 "$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/keyboard_seat_test.gd >>"$RUN_LOG" 2>&1
 "$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/audio_system_test.gd >>"$RUN_LOG" 2>&1
 "$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/pause_menu_test.gd >>"$RUN_LOG" 2>&1
@@ -55,7 +56,7 @@ if rg -n \
 	print -u2 "DEEP_NAV_FULL_VALIDATION_FAILED"
 	exit 1
 fi
-if ! rg -q 'FLOW_SMOKE_OK' "$RUN_LOG" || ! rg -q 'PARTICIPANT_UI_PRIVACY_OK missions=5' "$RUN_LOG" || ! rg -q 'VISUAL_ASSET_OK' "$RUN_LOG" || ! rg -q 'WAYPOINT_BEHAVIOR_OK' "$RUN_LOG" || ! rg -q 'MISSION_FLOW_OK' "$RUN_LOG" || ! rg -q 'MISSION_CATALOG_OK count=5' "$RUN_LOG" || ! rg -q 'BOUNDARY_PHYSICS_OK' "$RUN_LOG" || ! rg -q 'BELT_CONSISTENCY_OK' "$RUN_LOG" || ! rg -q 'NAVIGATION_DIFFICULTY_OK missions=5' "$RUN_LOG" || ! rg -q 'BILLBOARD_PROJECTION_OK' "$RUN_LOG" || ! rg -q 'ASTEROID_BELT_HAZARD_OK' "$RUN_LOG" || ! rg -q 'ASTEROID_BELT_GAMEPLAY_OK' "$RUN_LOG" || ! rg -q 'HULL_RING_FEEDBACK_OK' "$RUN_LOG" || ! rg -q 'ROLE_CLAIM_OK' "$RUN_LOG" || ! rg -q 'SESSION_PROGRESS_OK missions=5' "$RUN_LOG" || ! rg -q 'EXPERIMENT_PIPELINE_TEST_OK' "$RUN_LOG" || ! rg -q 'MENU_INPUT_TEST_OK' "$RUN_LOG" || ! rg -q 'KEYBOARD_SEAT_TEST_OK' "$RUN_LOG" || ! rg -q 'AUDIO_SYSTEM_TEST_OK' "$RUN_LOG" || ! rg -q 'PAUSE_MENU_TEST_OK' "$RUN_LOG" || ! rg -q 'PERFORMANCE_BUDGET_OK' "$RUN_LOG"; then
+if ! rg -q 'FLOW_SMOKE_OK' "$RUN_LOG" || ! rg -q 'PARTICIPANT_UI_PRIVACY_OK missions=5' "$RUN_LOG" || ! rg -q 'VISUAL_ASSET_OK' "$RUN_LOG" || ! rg -q 'WAYPOINT_BEHAVIOR_OK' "$RUN_LOG" || ! rg -q 'MISSION_FLOW_OK' "$RUN_LOG" || ! rg -q 'MISSION_CATALOG_OK count=5' "$RUN_LOG" || ! rg -q 'BOUNDARY_PHYSICS_OK' "$RUN_LOG" || ! rg -q 'BELT_CONSISTENCY_OK' "$RUN_LOG" || ! rg -q 'NAVIGATION_DIFFICULTY_OK missions=5' "$RUN_LOG" || ! rg -q 'BILLBOARD_PROJECTION_OK' "$RUN_LOG" || ! rg -q 'ASTEROID_BELT_HAZARD_OK' "$RUN_LOG" || ! rg -q 'ASTEROID_BELT_GAMEPLAY_OK' "$RUN_LOG" || ! rg -q 'HULL_RING_FEEDBACK_OK' "$RUN_LOG" || ! rg -q 'ROLE_CLAIM_OK' "$RUN_LOG" || ! rg -q 'SESSION_PROGRESS_OK missions=5' "$RUN_LOG" || ! rg -q 'EXPERIMENT_PIPELINE_TEST_OK' "$RUN_LOG" || ! rg -q 'MENU_INPUT_TEST_OK' "$RUN_LOG" || ! rg -q 'RAW_MOUSE_SEPARATION_OK slots=2 seats=2 cursors=independent' "$RUN_LOG" || ! rg -q 'KEYBOARD_SEAT_TEST_OK' "$RUN_LOG" || ! rg -q 'AUDIO_SYSTEM_TEST_OK' "$RUN_LOG" || ! rg -q 'PAUSE_MENU_TEST_OK' "$RUN_LOG" || ! rg -q 'PERFORMANCE_BUDGET_OK' "$RUN_LOG"; then
 	print -u2 "DEEP_NAV_FULL_VALIDATION_FAILED: smoke or mission audit did not reach its success sentinel"
 	exit 1
 fi

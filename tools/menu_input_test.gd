@@ -48,6 +48,16 @@ func _run() -> void:
 		assert(toggle.has_meta("ui_audio_wired") and toggle.get_meta("ui_press_cue")=="choice","%s must have choice audio" % toggle_name)
 	# 两只鼠标共享同一 Viewport 时分别保留 hover；短于进入阈值的抖动不能点亮。
 	displays.set("_raw_mouse_mode",true)
+	displays.call("_center_shared_cursors")
+	var cursor_a := displays.get("_cursor_a") as VirtualCursor
+	var cursor_b := displays.get("_cursor_b") as VirtualCursor
+	var start_a := cursor_a.position
+	var start_b := cursor_b.position
+	displays.call("_on_raw_mouse_motion",0,Vector2(48,0))
+	displays.call("_on_raw_mouse_motion",1,Vector2(-48,0))
+	assert(cursor_a.position.x > start_a.x + 40.0,"seat A cursor must move independently of hover pickup")
+	assert(cursor_b.position.x < start_b.x - 40.0,"seat B cursor must move independently of hover pickup")
+	assert(cursor_a.position.distance_to(cursor_b.position) > 80.0,"two raw mice must not collapse onto one cursor")
 	displays.emit_signal("seat_hover_changed",0,start)
 	await create_timer(0.03).timeout
 	displays.emit_signal("seat_hover_changed",0,null)
