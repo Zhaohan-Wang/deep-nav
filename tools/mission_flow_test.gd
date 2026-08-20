@@ -10,7 +10,8 @@ func _run() -> void:
 	await _check_end_ui_layout()
 	_check_relay_respawn_policy()
 	await _check_timed_respawn_flow()
-	print("MISSION_FLOW_OK survey_pages=2 cards_inside=960x540 death_respawns=true timeout_only_failure=true relay_stations=visible")
+	_check_heading_event_counter()
+	print("MISSION_FLOW_OK survey_pages=3 role_specific=true event_anchored=true heading_counter=true cards_inside=960x540 death_respawns=true timeout_only_failure=true relay_stations=visible")
 	quit(0)
 
 
@@ -18,7 +19,11 @@ func _check_end_ui_layout() -> void:
 	var host := Control.new()
 	host.size = Vector2(960,540)
 	root.add_child(host)
-	var summary := {"outcome":"超时未完成","success":false,"elapsed":150.0,"limit":150.0,"revivals":4,"hits":9,"waypoints":12,"hull":0.0}
+	var summary := {
+		"outcome":"超时未完成","success":false,"elapsed":150.0,"limit":150.0,
+		"revivals":4,"hits":9,"waypoints":12,"hull":0.0,
+		"severe_heading_deviations":3,"waypoint_drift_events":1,"ship_shear_events":0,
+	}
 	var result: Control = load("res://scripts/ui/mission_result_panel.gd").new()
 	host.add_child(result)
 	result.setup("navigator")
@@ -34,12 +39,59 @@ func _check_end_ui_layout() -> void:
 	survey.setup("navigator","超时未完成",summary)
 	await process_frame
 	_assert_visible_controls_inside(survey,host.get_global_rect(),"survey page 1")
+	var severe_metric := survey.find_child("Metric_SevereHeading",true,false) as Control
+	assert(severe_metric != null and _visible_text(severe_metric).contains("严重航向偏离") and _visible_text(severe_metric).contains("3次"),"survey did not highlight observed severe heading events")
+	assert(str(survey.call("_outcome_context_text")).contains("不评价任务成败"),"failure context did not separate outcome from event attribution")
+	var nav_causes := survey.call("_cause_options") as Array
+	assert(str(nav_causes[1]).contains("驾驶员操控"),"navigator did not receive navigator-specific cause wording")
+	assert(str(nav_causes[2]).contains("航点、方向、仪表"),"navigation information option remained ambiguous")
+	assert(str(nav_causes[3]).contains("转向、变速不如预期"),"ship response option remained ambiguous")
+	assert(nav_causes.size()==7,"cause choices must preserve multiple-cause and insufficient-information responses")
 	survey.call("_show_page",1)
 	await process_frame
 	await process_frame
 	_assert_visible_controls_inside(survey,host.get_global_rect(),"survey page 2")
+	survey.call("_show_page",2)
+	await process_frame
+	await process_frame
+	_assert_visible_controls_inside(survey,host.get_global_rect(),"survey page 3")
+	var pilot_survey: Control = load("res://scripts/ui/survey_panel.gd").new()
+	host.add_child(pilot_survey)
+	pilot_survey.setup("pilot","完成",summary.merged({"success":true},true))
+	assert(str((pilot_survey.call("_cause_options") as Array)[1]).contains("领航员引导"),"pilot did not receive pilot-specific cause wording")
+	assert(str(pilot_survey.call("_outcome_context_text")).contains("不评价任务成败"),"success context did not separate outcome from event attribution")
 	host.queue_free()
 	await process_frame
+
+
+func _visible_text(node: Node) -> String:
+	var out := ""
+	if node is Label:
+		out += (node as Label).text
+	for child: Node in node.get_children():
+		out += _visible_text(child)
+	return out
+
+
+func _check_heading_event_counter() -> void:
+	var game := root.get_node("Game")
+	game.call("select_mission","practice")
+	game.set("ship_alive",true)
+	game.set("has_waypoint",true)
+	game.set("ship_position",Vector3.ZERO)
+	game.set("waypoint",Vector3(10.0,0.0,0.0))
+	game.set("ship_heading",0.0)
+	game.set("ship_speed",4.0)
+	var tracker: Node = load("res://scripts/main.gd").new()
+	tracker.call("_track_severe_heading_deviation",1.1)
+	tracker.call("_track_severe_heading_deviation",1.1)
+	assert(int(tracker.get("_severe_heading_deviations"))==1,"sustained 90-degree deviation was not counted")
+	tracker.call("_track_severe_heading_deviation",2.1)
+	assert(int(tracker.get("_severe_heading_deviations"))==1,"one sustained episode was counted more than once")
+	game.set("ship_heading",-PI/2.0)
+	tracker.call("_track_severe_heading_deviation",0.1)
+	game.call("reset_run")
+	tracker.free()
 
 
 func _check_relay_respawn_policy() -> void:

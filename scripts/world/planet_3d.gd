@@ -9,6 +9,9 @@ var _planet: Control
 var _viewport: SubViewport
 var _sprite: Sprite3D
 var _physical_radius: float
+var _anim_time: float = 1000.0
+var _anim_accum: float = 0.0
+const ANIM_FPS: float = 8.0
 
 
 func setup(body: CelestialBodyData) -> void:
@@ -27,16 +30,18 @@ func setup(body: CelestialBodyData) -> void:
 	_viewport.transparent_bg = true
 	_viewport.disable_3d = true
 	_viewport.handle_input_locally = false
-	# 3D 行星表面本身就冻住（override_time），近大远小只改广告牌缩放。
-	# 视口每帧重绘的是同一张静帧；改成生成一次不影响观感，黑洞关能省掉最大那块 offscreen。
+	# 仍然使用 Sprite3D，但把 2D 行星低帧率烘到 SubViewport，
+	# 保留云层/环带/黑洞盘的动态外观，同时避免每帧都重绘。
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_viewport.gui_disable_input = true
 	_viewport.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
 	add_child(_viewport)
 
 	_planet = PlanetFactory.instantiate_planet(body.scene_path, pixels, body.seed_value, false)
-	# 冻住表面动画，避免远处日冕/色斑一闪一闪。
+	# 行星内部自己不自动跑时钟，改由这里低频推进并按需重绘。
 	_planet.set("override_time", true)
+	if _planet.has_method("set_custom_time"):
+		_planet.call("set_custom_time", _anim_time)
 	_viewport.add_child(_planet)
 
 	_sprite = Sprite3D.new()
@@ -62,8 +67,9 @@ func setup(body: CelestialBodyData) -> void:
 		add_child(light)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_update_spherical_projection()
+	_tick_planet_animation(delta)
 
 
 func _update_spherical_projection() -> void:
@@ -85,6 +91,19 @@ func apply_star_light(star_pos: Vector3) -> void:
 	var light_uv: Vector2 = PlanetFactory.light_uv_from_star(global_position, star_pos)
 	_planet.call("set_light", light_uv)
 	# setup 后同一帧会设置恒星方向，确保最终光照状态至少渲染一帧。
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+func _tick_planet_animation(delta: float) -> void:
+	if _planet == null or not _planet.has_method("set_custom_time"):
+		return
+	_anim_accum += delta
+	var frame_step := 1.0 / ANIM_FPS
+	if _anim_accum < frame_step:
+		return
+	_anim_time += _anim_accum * maxf(data.spin_speed, 0.02)
+	_anim_accum = 0.0
+	_planet.call("set_custom_time", _anim_time)
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 

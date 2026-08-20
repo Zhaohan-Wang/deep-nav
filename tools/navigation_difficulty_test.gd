@@ -25,6 +25,14 @@ func _run() -> void:
 			_check(route_risk<=4.0,"%s 规划路线仍穿入危险带（%.1f u）" % [mission.id,route_risk])
 			_check(turns>=2,"%s 不需要至少两次有意义的转向" % mission.id)
 			_check(route_length/direct_length>=1.015,"%s 计划路线几乎就是直线" % mission.id)
+		if mission.id=="level_4":
+			var reversals:=_lateral_reversals(mission.route_checkpoints)
+			var lateral_span:=_lateral_span(mission.route_checkpoints)
+			var macro_bow:=_macro_bow(mission.route_checkpoints)
+			_check(reversals>=7,"level_4 波浪航槽不足 7 次反向弯折（当前 %d）" % reversals)
+			_check(lateral_span>=58.0,"level_4 波浪航槽横向摆幅不足（当前 %.1f u）" % lateral_span)
+			_check(absf(macro_bow)>=8.0,"level_4 只有局部波浪，没有贯穿全图的大弧线（当前 %.1f u）" % macro_bow)
+			_check(route_length/direct_length>=1.18,"level_4 路线迂回率不足（当前 %.3f）" % (route_length/direct_length))
 		_check(body_clearance>=3.0,"%s 计划路线离实体天体过近（净空 %.1f u）" % [mission.id,body_clearance])
 		print("NAV_DIFFICULTY %s direct_risk=%.1f route_risk=%.1f detour=%.3f turns=%d body_clearance=%.1f" % [
 			mission.id,direct_risk,route_risk,route_length/direct_length,turns,body_clearance])
@@ -66,6 +74,38 @@ func _meaningful_turns(points: PackedVector3Array) -> int:
 		var before:=(points[i]-points[i-1]).normalized(); var after:=(points[i+1]-points[i]).normalized()
 		if rad_to_deg(acos(clampf(before.dot(after),-1.0,1.0)))>=8.0: count+=1
 	return count
+
+func _lateral_reversals(points: PackedVector3Array) -> int:
+	var reversals:=0
+	var previous_sign:=0.0
+	for i: int in range(points.size()-1):
+		var dz:=points[i+1].z-points[i].z
+		if absf(dz)<0.35: continue
+		var current_sign:=signf(dz)
+		if not is_zero_approx(previous_sign) and current_sign!=previous_sign: reversals+=1
+		previous_sign=current_sign
+	return reversals
+
+func _lateral_span(points: PackedVector3Array) -> float:
+	var min_z:=INF
+	var max_z:=-INF
+	for point: Vector3 in points:
+		min_z=minf(min_z,point.z)
+		max_z=maxf(max_z,point.z)
+	return max_z-min_z
+
+func _macro_bow(points: PackedVector3Array) -> float:
+	var first:=points[0]
+	var last:=points[points.size()-1]
+	var total:=0.0
+	var samples:=0
+	for i: int in range(points.size()):
+		var progress:=float(i)/float(maxi(points.size()-1,1))
+		if progress<0.20 or progress>0.80: continue
+		var baseline:=lerpf(first.z,last.z,progress)
+		total+=points[i].z-baseline
+		samples+=1
+	return total/float(maxi(samples,1))
 
 func _minimum_body_clearance(points: PackedVector3Array,mission: SectorData) -> float:
 	var result:=INF

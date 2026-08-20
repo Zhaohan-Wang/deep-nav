@@ -22,7 +22,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.1.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>DeepNav records the experiment session audio for research analysis.</string>
 </dict>

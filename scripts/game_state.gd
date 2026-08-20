@@ -60,11 +60,14 @@ var experiment_mode: bool = false
 var master_volume: float = 0.85
 var screen_shake_enabled: bool = true
 var fullscreen_dual_display: bool = true
-var waypoint_cooldown_s: float = 2.0
+var waypoint_cooldown_s: float = 4.0
 var waypoint_max_distance: float = 72.0
 const WAYPOINT_READY_NOTICE_S: float = 2.0
 const SETTINGS_PATH := "user://settings.cfg"
-const EXPERIMENT_PROTOCOL_VERSION := "attribution-1.0"
+## 每次需要参与者重新确认声音、动态效果和 macOS 权限说明时递增。
+const SETTINGS_REVISION: int = 2
+const EXPERIMENT_PROTOCOL_VERSION := "attribution-2.2"
+var settings_revision: int = 0
 var dyad_sequence: int = 0
 var dyad_id: String = ""
 var participant_a: String = ""
@@ -195,19 +198,21 @@ func load_settings() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SETTINGS_PATH) != OK:
 		return
+	settings_revision = int(cfg.get_value("meta", "settings_revision", 0))
 	master_volume = clampf(float(cfg.get_value("audio", "master_volume", 0.85)), 0.0, 1.0)
 	debug_mode = bool(cfg.get_value("mode", "debug", false))
 	experiment_mode = bool(cfg.get_value("mode", "experiment", false))
 	screen_shake_enabled = bool(cfg.get_value("visual", "screen_shake", true))
 	# 双屏是应用的固定结构，旧配置中的关闭值不再覆盖它。
 	fullscreen_dual_display = true
-	waypoint_cooldown_s = clampf(float(cfg.get_value("navigation", "cooldown_s", 2.0)), 0.5, 5.0)
+	waypoint_cooldown_s = clampf(float(cfg.get_value("navigation", "cooldown_s", 4.0)), 0.5, 5.0)
 	waypoint_max_distance = clampf(float(cfg.get_value("navigation", "max_distance", 72.0)), 24.0, 140.0)
 	_apply_volume()
 
 
 func save_settings() -> void:
 	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "settings_revision", settings_revision)
 	cfg.set_value("audio", "master_volume", master_volume)
 	cfg.set_value("mode", "debug", debug_mode)
 	cfg.set_value("mode", "experiment", experiment_mode)
@@ -218,6 +223,15 @@ func save_settings() -> void:
 	cfg.save(SETTINGS_PATH)
 	_apply_volume()
 	settings_changed.emit()
+
+
+func needs_settings_confirmation() -> bool:
+	return settings_revision < SETTINGS_REVISION
+
+
+func confirm_settings_revision() -> void:
+	settings_revision = SETTINGS_REVISION
+	save_settings()
 
 
 func _apply_volume() -> void:

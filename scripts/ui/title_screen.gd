@@ -46,6 +46,8 @@ func _ready() -> void:
 	menu.add_child(data)
 	var quit := UI.button("退出",Vector2(380,64)); quit.name = "QuitButton"; UI.set_button_audio_cue(quit,"popup_close"); quit.pressed.connect(func(): get_tree().quit()); menu.add_child(quit)
 	GameAudio.play_ui_popup_open()
+	if Game.needs_settings_confirmation():
+		_open_first_run_setup.call_deferred()
 
 
 func _build_cover() -> void:
@@ -207,6 +209,60 @@ func _animate_switch_hover(toggle: Button, target: float) -> void:
 	var tween := toggle.create_tween()
 	tween.tween_property(toggle,"scale",Vector2.ONE*target,0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
+
+func _open_first_run_setup() -> void:
+	if _settings != null: return
+	_settings = Control.new()
+	_settings.name = "FirstRunSettings"
+	_settings.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_settings)
+	var dim := ColorRect.new()
+	dim.color = Color(0,0,0,0.82)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_settings.add_child(dim)
+	var panel := UI.panel()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.position = Vector2(-390,-360)
+	panel.size = Vector2(780,720)
+	_settings.add_child(panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation",20)
+	panel.add_child(box)
+	box.add_child(UI.label("新版首次设置",38,UI.CYAN))
+	var intro := UI.label("DeepNav 1.1.0 需要重新确认本机偏好。保存后，本版本不会再次询问。",21,UI.TEXT)
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(intro)
+	box.add_child(_toggle("启用游戏声音",Game.master_volume>0.001,func(enabled: bool):
+		Game.master_volume = 0.85 if enabled and Game.master_volume<=0.001 else (Game.master_volume if enabled else 0.0)
+		Game.save_settings()
+	))
+	box.add_child(_slider("游戏音量",0,100,Game.master_volume*100.0,func(v):
+		Game.master_volume=v/100.0
+		Game.save_settings()
+	,"%d%%"))
+	box.add_child(_toggle("画面震动",Game.screen_shake_enabled,func(enabled: bool):
+		Game.screen_shake_enabled=enabled
+		Game.save_settings()
+	))
+	var permission := UI.label(
+		"macOS 权限说明\n双鼠标：需要“输入监控”（不是“辅助功能”）\n实验录音：需要“麦克风”\n系统会在首次实际使用时询问；授权后请完全退出并重新打开 DeepNav。",
+		20,UI.AMBER
+	)
+	permission.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(permission)
+	var done := UI.button("保存设置并继续",Vector2(360,72),true)
+	done.name = "ConfirmFirstRunSettings"
+	UI.set_button_audio_cue(done,"confirm")
+	done.pressed.connect(_confirm_first_run_settings)
+	box.add_child(done)
+
+
+func _confirm_first_run_settings() -> void:
+	Game.confirm_settings_revision()
+	_settings.queue_free()
+	_settings = null
+
+
 func _open_settings() -> void:
 	if _settings != null: return
 	_settings = Control.new(); _settings.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(_settings)
@@ -262,8 +318,20 @@ func _input_device_section() -> Control:
 	# ---- 键盘区 ----
 	var kb_col := VBoxContainer.new()
 	kb_col.add_theme_constant_override("separation", 4)
-	kb_col.add_child(UI.label(_keyboard_seat_text(0), 20, UI.TEXT))
-	kb_col.add_child(UI.label(_keyboard_seat_text(1), 20, UI.TEXT))
+
+	var kb_a_label := UI.label(_keyboard_seat_text(0), 20, UI.TEXT)
+	var kb_b_label := UI.label(_keyboard_seat_text(1), 20, UI.TEXT)
+	kb_col.add_child(kb_a_label)
+	kb_col.add_child(kb_b_label)
+
+	var swap_keyboard_btn := UI.button("翻转键盘", Vector2(180, 56))
+	UI.set_button_audio_cue(swap_keyboard_btn, "choice")
+	swap_keyboard_btn.pressed.connect(func() -> void:
+		RawMice.swap_keyboard_seats()
+		kb_a_label.text = _keyboard_seat_text(0)
+		kb_b_label.text = _keyboard_seat_text(1)
+	)
+	kb_col.add_child(swap_keyboard_btn)
 	col.add_child(kb_col)
 
 	# ---- 键盘识别测试 ----
@@ -280,8 +348,15 @@ func _input_device_section() -> Control:
 	# 用 HID key 实时轮询，避免依赖 F/快捷键
 	var timer := col.create_tween().set_loops()
 	timer.tween_callback(func() -> void:
-		var a_held := RawMice.is_hid_key_pressed(0, 0x02)  # HID Shift
-		var b_held := RawMice.is_hid_key_pressed(1, 0x02)
+		# HID KeyboardOrKeypad：Left Shift=0xE1, Right Shift=0xE5
+		var a_held := (
+			RawMice.is_hid_key_pressed(0, 0xE1) or
+			RawMice.is_hid_key_pressed(0, 0xE5)
+		)
+		var b_held := (
+			RawMice.is_hid_key_pressed(1, 0xE1) or
+			RawMice.is_hid_key_pressed(1, 0xE5)
+		)
 		_update_kbd_indicator(ind_a, a_held)
 		_update_kbd_indicator(ind_b, b_held)
 	).set_delay(0.05)

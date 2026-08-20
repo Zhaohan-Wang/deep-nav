@@ -5,6 +5,7 @@ const OUT_START := "res://artifacts/runtime/gameplay_split_start.png"
 const OUT_WAYPOINT_COOLDOWN := "res://artifacts/runtime/gameplay_waypoint_cooldown.png"
 const OUT_CONTROL_ARROWS := "res://artifacts/runtime/gameplay_control_arrows.png"
 const OUT_TITLE := "res://artifacts/runtime/title_screen.png"
+const OUT_FIRST_RUN := "res://artifacts/runtime/first_run_settings.png"
 const OUT_THANK_YOU := "res://artifacts/runtime/thank_you.png"
 const OUT_LEVEL_SELECT := "res://artifacts/runtime/level_select_experiment.png"
 const OUT_HULL_DAMAGE := "res://artifacts/runtime/gameplay_hull_ring_damage.png"
@@ -19,6 +20,7 @@ const OUT_RESULT_SUCCESS := "res://artifacts/runtime/mission_result_success.png"
 const OUT_SUMMARY := "res://artifacts/runtime/mission_summary.png"
 const OUT_SURVEY_1 := "res://artifacts/runtime/survey_page_1.png"
 const OUT_SURVEY_2 := "res://artifacts/runtime/survey_page_2.png"
+const OUT_SURVEY_3 := "res://artifacts/runtime/survey_page_3.png"
 
 
 func _initialize() -> void:
@@ -31,6 +33,17 @@ func _capture() -> void:
 		push_error("RUNTIME_CAPTURE_FAILED Game autoload missing")
 		quit(1)
 		return
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://artifacts/runtime"))
+	# 先验证发布版第一次打开时的版本化偏好确认。
+	game.set("settings_revision",0)
+	var first_run_title := (load("res://scenes/title_screen.tscn") as PackedScene).instantiate()
+	root.add_child(first_run_title)
+	for i: int in range(8): await process_frame
+	if not _save_capture(OUT_FIRST_RUN): quit(1); return
+	first_run_title.queue_free()
+	for i: int in range(4): await process_frame
+	# 其余视觉回归截图进入已确认状态，避免遮挡标题与后续流程。
+	game.set("settings_revision",Game.SETTINGS_REVISION)
 	game.set("fullscreen_dual_display",false)
 	game.call("set_view_mode",0)
 	game.set("experiment_mode",false)
@@ -39,7 +52,6 @@ func _capture() -> void:
 	var title_page := title_packed.instantiate()
 	root.add_child(title_page)
 	for i: int in range(8): await process_frame
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://artifacts/runtime"))
 	if not _save_capture(OUT_TITLE):
 		quit(1)
 		return
@@ -203,7 +215,11 @@ func _capture() -> void:
 	for result: Control in result_panels: result.show_result("超时未完成",false)
 	for i: int in range(3): await process_frame
 	if not _save_capture(OUT_RESULT): quit(1); return
-	var summary := {"outcome":"超时未完成","success":false,"elapsed":160.0,"limit":160.0,"revivals":2,"hits":5,"waypoints":8,"hull":0.0}
+	var summary := {
+		"outcome":"超时未完成","success":false,"elapsed":160.0,"limit":160.0,
+		"revivals":2,"hits":5,"waypoints":8,"hull":0.0,
+		"severe_heading_deviations":3,"waypoint_drift_events":1,"ship_shear_events":0,
+	}
 	for result: Control in result_panels: result.show_summary(summary)
 	for i: int in range(3): await process_frame
 	if not _save_capture(OUT_SUMMARY): quit(1); return
@@ -219,7 +235,10 @@ func _capture() -> void:
 	for survey: Control in surveys: survey.call("_show_page",1)
 	for i: int in range(3): await process_frame
 	if not _save_capture(OUT_SURVEY_2): quit(1); return
-	print("RUNTIME_CAPTURE_OK title=%s select=%s start=%s cooldown=%s arrows=%s hull=%s mid=%s approach=%s boundary=%s level3=%s blocker=%s explosion=%s result=%s result_success=%s summary=%s survey1=%s survey2=%s" % [OUT_TITLE,OUT_LEVEL_SELECT,OUT_START,OUT_WAYPOINT_COOLDOWN,OUT_CONTROL_ARROWS,OUT_HULL_DAMAGE,OUT_MID,OUT_PLANET_APPROACH,OUT_BOUNDARY,OUT_LEVEL3_CORRIDOR,OUT_LEVEL3_BLOCKER,OUT_EXPLOSION,OUT_RESULT,OUT_RESULT_SUCCESS,OUT_SUMMARY,OUT_SURVEY_1,OUT_SURVEY_2])
+	for survey: Control in surveys: survey.call("_show_page",2)
+	for i: int in range(3): await process_frame
+	if not _save_capture(OUT_SURVEY_3): quit(1); return
+	print("RUNTIME_CAPTURE_OK first_run=%s title=%s select=%s start=%s cooldown=%s arrows=%s hull=%s mid=%s approach=%s boundary=%s level3=%s blocker=%s explosion=%s result=%s result_success=%s summary=%s survey1=%s survey2=%s survey3=%s" % [OUT_FIRST_RUN,OUT_TITLE,OUT_LEVEL_SELECT,OUT_START,OUT_WAYPOINT_COOLDOWN,OUT_CONTROL_ARROWS,OUT_HULL_DAMAGE,OUT_MID,OUT_PLANET_APPROACH,OUT_BOUNDARY,OUT_LEVEL3_CORRIDOR,OUT_LEVEL3_BLOCKER,OUT_EXPLOSION,OUT_RESULT,OUT_RESULT_SUCCESS,OUT_SUMMARY,OUT_SURVEY_1,OUT_SURVEY_2,OUT_SURVEY_3])
 	quit(0)
 
 

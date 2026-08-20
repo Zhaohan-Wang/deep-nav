@@ -26,6 +26,9 @@ func _run() -> void:
 	setup.queue_free()
 	await process_frame
 
+	# 常规标题交互测试不让版本化首次设置遮挡；首次设置在下方单独验证。
+	var game := root.get_node("Game")
+	game.set("settings_revision",Game.SETTINGS_REVISION)
 	var title := (load("res://scenes/title_screen.tscn") as PackedScene).instantiate()
 	root.add_child(title)
 	await process_frame
@@ -80,6 +83,13 @@ func _run() -> void:
 	var slider := HSlider.new()
 	AppStyle.style_slider(slider)
 	assert(slider.has_meta("ui_audio_wired"),"styled sliders must have tick audio")
+	title.call("_open_first_run_setup")
+	await process_frame
+	var first_run := title.find_child("FirstRunSettings",true,false)
+	var confirm := title.find_child("ConfirmFirstRunSettings",true,false) as Button
+	assert(first_run!=null and confirm!=null,"versioned first-run preferences must be available")
+	assert(_visible_text(first_run).contains("输入监控") and _visible_text(first_run).contains("麦克风"),
+		"first-run preferences must explain macOS permissions")
 	print("MENU_INPUT_TEST_OK keyboard=root+secondary font=pixel hover=debounced+multi_pointer focus=mouse_only audio=shared")
 	quit(0)
 
@@ -101,3 +111,10 @@ func _first_button(node: Node) -> Button:
 		if found!=null:
 			return found
 	return null
+
+
+func _visible_text(node: Node) -> String:
+	var result := (node as Label).text if node is Label else ""
+	for child: Node in node.get_children():
+		result += _visible_text(child)
+	return result

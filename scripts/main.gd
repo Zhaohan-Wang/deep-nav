@@ -37,6 +37,12 @@ const DEATH_CURVE: Array[Vector2] = [
 const DEATH_RESET_TIME: float = 0.58
 const HID_KEY_ESCAPE: int = 0x29
 const PAUSE_TOGGLE_DEBOUNCE_MS: int = 180
+## 客观事件锚点：移动中持续背离当前航点才计数，短暂转弯不算严重偏离。
+const SEVERE_HEADING_ENTER_RAD := deg_to_rad(60.0)
+const SEVERE_HEADING_EXIT_RAD := deg_to_rad(40.0)
+const SEVERE_HEADING_MIN_S := 2.0
+const SEVERE_HEADING_MIN_SPEED := 3.0
+const SEVERE_HEADING_MIN_WAYPOINT_DISTANCE := 8.0
 
 var _world: Node3D
 var _ship: Ship
@@ -76,6 +82,11 @@ var _mission_elapsed: float = 0.0
 var _mission_deaths: int = 0
 var _mission_hits: int = 0
 var _mission_waypoints: int = 0
+var _severe_heading_deviations: int = 0
+var _heading_deviation_candidate_s: float = 0.0
+var _heading_deviation_active: bool = false
+var _waypoint_drift_events: int = 0
+var _ship_shear_events: int = 0
 var _mission_finishing: bool = false
 var _mission_ended: bool = false
 var _mission_outcome: String = ""
@@ -157,10 +168,51 @@ func _process(delta: float) -> void:
 			_begin_mission_end("超时未完成",false)
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	if get_tree().paused:
 		return
+	_track_severe_heading_deviation(delta)
 	ExperimentLog.sample_frame()
+
+
+func _track_severe_heading_deviation(delta: float) -> void:
+	if (_mission_ended or _mission_finishing or not Game.ship_alive or not Game.has_waypoint
+			or Game.ship_speed < SEVERE_HEADING_MIN_SPEED):
+		_reset_heading_deviation_state()
+		return
+	var to_waypoint := Game.waypoint - Game.ship_position
+	to_waypoint.y = 0.0
+	if to_waypoint.length() < SEVERE_HEADING_MIN_WAYPOINT_DISTANCE:
+		_reset_heading_deviation_state()
+		return
+	var target_heading := atan2(-to_waypoint.x,-to_waypoint.z)
+	var heading_error := absf(wrapf(target_heading-Game.ship_heading,-PI,PI))
+	if _heading_deviation_active:
+		if heading_error <= SEVERE_HEADING_EXIT_RAD:
+			_reset_heading_deviation_state()
+		return
+	if heading_error < SEVERE_HEADING_ENTER_RAD:
+		_heading_deviation_candidate_s = 0.0
+		return
+	_heading_deviation_candidate_s += delta
+	if _heading_deviation_candidate_s < SEVERE_HEADING_MIN_S:
+		return
+	_heading_deviation_active = true
+	_severe_heading_deviations += 1
+	ExperimentLog.log_event("severe_heading_deviation","system",{
+		"index":_severe_heading_deviations,
+		"heading_error_degrees":rad_to_deg(heading_error),
+		"threshold_degrees":rad_to_deg(SEVERE_HEADING_ENTER_RAD),
+		"minimum_duration_s":SEVERE_HEADING_MIN_S,
+		"speed":Game.ship_speed,
+		"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z,
+		"waypoint_x":Game.waypoint.x,"waypoint_z":Game.waypoint.z,
+	})
+
+
+func _reset_heading_deviation_state() -> void:
+	_heading_deviation_candidate_s = 0.0
+	_heading_deviation_active = false
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -858,6 +910,10 @@ func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
 	var details := payload.duplicate()
 	details["condition"] = Game.attribution_condition
 	ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+	if effect == "waypoint_drift":
+		_waypoint_drift_events += 1
+	elif effect == "ship_shear":
+		_ship_shear_events += 1
 	var explicit := Game.attribution_condition=="explicit"
 	var message := ""
 	match effect:
@@ -916,7 +972,10 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	var limit := Game.current_sector.time_limit_s if Game.current_sector != null else _mission_elapsed
 	var summary := {
 		"outcome":outcome,"success":success,"elapsed":_mission_elapsed,"limit":limit,
-		"revivals":_mission_deaths,"hits":_mission_hits,"waypoints":_mission_waypoints,"hull":Game.hull
+		"revivals":_mission_deaths,"hits":_mission_hits,"waypoints":_mission_waypoints,"hull":Game.hull,
+		"severe_heading_deviations":_severe_heading_deviations,
+		"waypoint_drift_events":_waypoint_drift_events,
+		"ship_shear_events":_ship_shear_events,
 	}
 	ExperimentLog.log_event("mission_end","system",summary)
 	await _show_result_flow(outcome,success,summary)

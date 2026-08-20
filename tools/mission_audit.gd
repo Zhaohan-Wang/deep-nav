@@ -88,13 +88,13 @@ func _run() -> void:
 		_check(boundary_count == 1, "%s 必须恰有一个边界带" % mission.id)
 		# 实验关之间的空间语法也是实验控制的一部分，不能只换皮肤。
 		if mission.id == "level_1":
-			_check(open_ring_count == 1 and spline_count == 0,
-				"level_1 必须保持单环分岔基线，不能退化成走廊")
+			_check(open_ring_count >= 3 and spline_count == 0,
+				"level_1 必须保持多环绕行链基线，不能退化成走廊")
 			_check(mission.disturbance_slots.is_empty(),
 				"level_1 基线关不得包含实验扰动")
 		if mission.id == "level_3":
-			_check(open_ring_count == 0 and spline_count == 2,
-				"level_3 必须保持双样条单解走廊，不能重新变成 level_1 的环带")
+			_check(open_ring_count == 0 and spline_count == 4,
+				"level_3 必须保持两段双样条井廊，不能重新变成 level_1 的环带")
 			_check(mission.disturbance_slots == PackedStringArray(["waypoint_drift"]),
 				"level_3 必须且只能包含一次航点漂移")
 			var blocker := _body(mission,"ring")
@@ -124,6 +124,17 @@ func _run() -> void:
 					_check(_distance_to_segment(rejoin_guard.world_position,upper_bypass,dest.world_position)
 						<= rejoin_guard.collision_radius + Game.SHIP_RADIUS + 1.0,
 						"level_3 无声月没有限制最省事的立即回切")
+		if mission.id == "level_4":
+			_check(spline_count == 2,"level_4 必须由上下两条样条脊围成唯一波浪航槽")
+			_check(boundary != null,"level_4 缺少用于封死溜边路线的外圈")
+			if boundary != null:
+				for belt: BeltData in mission.belts:
+					if belt.is_boundary or belt.shape != BeltData.Shape.SPLINE: continue
+					for t: float in [0.0,1.0]:
+						var endpoint:=belt.spline_point(t)
+						var closed_radius:=boundary.inner_radius-belt.spline_half_width(t)-Game.SHIP_RADIUS
+						_check(boundary.ellipse_factor(endpoint,closed_radius)>=1.0,
+							"level_4 的 %s 端头未接入外圈，仍可从上/下沿溜边" % belt.id)
 		if boundary != null:
 			_check(boundary.outer_radius-boundary.inner_radius >= 10.0, "%s 连续边界墙过薄" % mission.id)
 			_check(boundary.boundary_segment_count() >= 96, "%s 连续边界墙细分不足" % mission.id)

@@ -18,8 +18,10 @@ var _bridge_pid: int = -1
 var _devices: Dictionary = {}
 var _keyboards: Dictionary = {}
 var _pressed_keys: Dictionary = {0: {}, 1: {}}
-## 鼠标席位通过设置页面按钮翻转；键盘固定为内置=A、外接=B，绝不跟随鼠标交换。
+## 鼠标席位通过设置页面按钮翻转。
+## 键盘席位也需要可翻转：否则“键盘 A/B 对应屏幕 A/B”的测试和真实路由会不一致。
 var _mouse_slots_to_seats: Dictionary = {0: 0, 1: 1}
+var _keyboard_slots_to_seats: Dictionary = {0: 0, 1: 1}
 var _bridge_ready: bool = false
 var _platform_supported: bool = false
 var _listening: bool = false
@@ -109,7 +111,8 @@ func _handle_message(message: Dictionary) -> void:
 		var kind := str(message.get("kind", "mouse"))
 		var product := str(message.get("product", "HID Device"))
 		if kind == "keyboard":
-			var slot := device_slot
+			# Bridge 的 slot 是物理设备编号；这里映射到逻辑席位（屏幕 A/B）。
+			var slot := int(_keyboard_slots_to_seats.get(device_slot, device_slot))
 			if connected:
 				_keyboards[slot] = product
 			else:
@@ -144,7 +147,8 @@ func _handle_message(message: Dictionary) -> void:
 		mouse_wheel.emit(int(_mouse_slots_to_seats.get(device_slot, device_slot)), int(message.get("delta", 0)))
 	elif type == "key":
 		var device_slot := int(message.get("slot", -1))
-		var seat := device_slot
+		# Bridge 的 slot 是物理设备编号；这里映射到逻辑席位（屏幕 A/B）。
+		var seat := int(_keyboard_slots_to_seats.get(device_slot, device_slot))
 		var usage := int(message.get("usage", 0))
 		var pressed := bool(message.get("pressed", false))
 		if seat >= 0 and seat <= 1:
@@ -191,6 +195,34 @@ func swap_mouse_seats() -> void:
 			"screen_b_device":previous_a,
 		})
 	print("RAW_MOUSE_SEATS_SWAPPED seat_a=%s seat_b=%s" % [previous_b, previous_a])
+
+
+func swap_keyboard_seats() -> void:
+	_keyboard_slots_to_seats[0] = 1 - int(_keyboard_slots_to_seats.get(0, 0))
+	_keyboard_slots_to_seats[1] = 1 - int(_keyboard_slots_to_seats.get(1, 1))
+
+	var previous_a := str(_keyboards.get(0, ""))
+	var previous_b := str(_keyboards.get(1, ""))
+
+	var previous_pressed_a := (_pressed_keys.get(0, {}) as Dictionary).duplicate(true)
+	var previous_pressed_b := (_pressed_keys.get(1, {}) as Dictionary).duplicate(true)
+
+	_keyboards.clear()
+	if not previous_b.is_empty(): _keyboards[0] = previous_b
+	if not previous_a.is_empty(): _keyboards[1] = previous_a
+
+	_pressed_keys[0] = previous_pressed_b
+	_pressed_keys[1] = previous_pressed_a
+
+	keyboard_device_changed.emit(0, not previous_b.is_empty(), previous_b)
+	keyboard_device_changed.emit(1, not previous_a.is_empty(), previous_a)
+
+	if Game.experiment_mode:
+		ExperimentLog.log_event("keyboard_seats_swapped","system",{
+			"screen_a_keyboard":previous_b,
+			"screen_b_keyboard":previous_a,
+		})
+	print("RAW_KEYBOARD_SEATS_SWAPPED seat_a=%s seat_b=%s" % [previous_b, previous_a])
 
 
 func has_keyboard(seat: int) -> bool:

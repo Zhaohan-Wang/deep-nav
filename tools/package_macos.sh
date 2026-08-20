@@ -63,6 +63,7 @@ codesign --force --sign "$SIGN_IDENTITY" \
 codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements "$ENTITLEMENTS" "$HELPERS/DeepNavAudioRecorder.app"
 codesign --force --sign "$SIGN_IDENTITY" --preserve-metadata=identifier,entitlements,flags "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
+codesign -dv --verbose=4 "$APP"
 
 cat > "$DIST_ROOT/实验数据位置.txt" <<'TEXT'
 DeepNav 打包版实验记录：
@@ -74,6 +75,14 @@ DeepNav 打包版实验记录：
 首次使用实验模式时，macOS 会分别请求：
 1. 输入监控权限（区分两只实体鼠标）
 2. 麦克风权限（录制实验原始音频）
+
+DeepNav 1.1.0 首次打开还会在应用内重新确认：
+1. 是否启用游戏声音以及音量
+2. 是否启用画面震动
+
+双鼠标使用的是「输入监控」，不是「辅助功能」。同一台 Mac 如果已经
+授权过相同 Bundle ID 和开发团队，macOS 可能沿用原权限而不重复弹窗。
+需要重新验证系统弹窗时，请先在“系统设置 → 隐私与安全性”中移除旧授权。
 
 修改权限后如未立即生效，请完全退出 DeepNav 再重新打开。
 TEXT
