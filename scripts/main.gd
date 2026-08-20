@@ -182,9 +182,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("switch_pointer_role") and Game.view_mode == Game.ViewMode.DUAL_WINDOW:
 		_switch_pointer_role()
 		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed("swap_mouse_seats"):
-		RawMice.swap_mouse_seats()
-		get_viewport().set_input_as_handled()
+	# 鼠标席位翻转已移至设置页面按钮，不再绑定快捷键
 
 
 func _on_shared_key_input(event: InputEventKey) -> void:
@@ -287,7 +285,7 @@ func _bind_inputs() -> void:
 	_bind_key("reset_run", KEY_R)
 	_bind_key("toggle_nav_deck", KEY_E)
 	_bind_key("switch_pointer_role", KEY_F4)
-	_bind_key("swap_mouse_seats", KEY_F6)
+	# swap_mouse_seats 快捷键已移除；翻转操作改为设置页面按钮
 
 
 func _bind_key(action: String, key: Key) -> void:

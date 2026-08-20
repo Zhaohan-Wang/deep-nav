@@ -37,8 +37,8 @@ func _run() -> void:
 	assert(start.has_meta("ui_audio_wired") and settings.has_meta("ui_audio_wired"),"title buttons must have shared UI audio")
 	assert(start.get_meta("ui_press_cue")=="page_turn","start button must use page transition audio")
 	assert(settings.get_meta("ui_press_cue")=="popup_open","settings button must use popup audio")
-	var start_hover := start.get_theme_stylebox("hover") as StyleBoxFlat
-	var settings_hover := settings.get_theme_stylebox("hover") as StyleBoxFlat
+	var start_hover := start.get_meta("ui_hover_style") as StyleBoxFlat
+	var settings_hover := settings.get_meta("ui_hover_style") as StyleBoxFlat
 	assert(start_hover.bg_color==settings_hover.bg_color,"start hover fill must match other title buttons")
 	assert(start_hover.border_color==settings_hover.border_color,"start hover border must match other title buttons")
 	for toggle_name: String in ["DebugModeSwitch","ExperimentModeSwitch"]:
@@ -46,7 +46,7 @@ func _run() -> void:
 		var toggle := _first_button(row)
 		assert(toggle!=null and toggle.focus_mode==Control.FOCUS_NONE,"%s must be mouse-only" % toggle_name)
 		assert(toggle.has_meta("ui_audio_wired") and toggle.get_meta("ui_press_cue")=="choice","%s must have choice audio" % toggle_name)
-	# 保留正常基线的直接事件路由：两个原始席位只能更新各自光标。
+	# 两只鼠标共享同一 Viewport 时分别保留 hover；短于进入阈值的抖动不能点亮。
 	displays.set("_raw_mouse_mode",true)
 	displays.call("_center_shared_cursors")
 	var cursor_a := displays.get("_cursor_a") as VirtualCursor
@@ -58,11 +58,29 @@ func _run() -> void:
 	assert(cursor_a.position.x > start_a.x + 40.0,"seat A cursor must move independently of hover pickup")
 	assert(cursor_b.position.x < start_b.x - 40.0,"seat B cursor must move independently of hover pickup")
 	assert(cursor_a.position.distance_to(cursor_b.position) > 80.0,"two raw mice must not collapse onto one cursor")
+	displays.emit_signal("seat_hover_changed",0,start)
+	await create_timer(0.03).timeout
+	displays.emit_signal("seat_hover_changed",0,null)
+	await create_timer(0.09).timeout
+	assert(not bool(start.get_meta("ui_hover_active")),"brief pointer jitter must not activate hover")
+	displays.emit_signal("seat_hover_changed",0,start)
+	displays.emit_signal("seat_hover_changed",1,settings)
+	await create_timer(0.09).timeout
+	assert(bool(start.get_meta("ui_hover_active")) and bool(settings.get_meta("ui_hover_active")),"two physical pointers must retain independent hover targets")
+	displays.emit_signal("seat_hover_changed",1,start)
+	await create_timer(0.05).timeout
+	assert(bool(settings.get_meta("ui_hover_active")),"hover exit grace must absorb a transient leave")
+	await create_timer(0.09).timeout
+	assert(not bool(settings.get_meta("ui_hover_active")) and bool(start.get_meta("ui_hover_active")),"stable leave must clear only that pointer target")
+	displays.emit_signal("seat_hover_changed",0,null)
+	displays.emit_signal("seat_hover_changed",1,null)
+	await create_timer(0.14).timeout
+	assert(not bool(start.get_meta("ui_hover_active")),"hover must clear after both pointers leave")
 	displays.set("_raw_mouse_mode",false)
 	var slider := HSlider.new()
 	AppStyle.style_slider(slider)
 	assert(slider.has_meta("ui_audio_wired"),"styled sliders must have tick audio")
-	print("MENU_INPUT_TEST_OK keyboard=root+secondary font=pixel hover=baseline focus=mouse_only audio=shared")
+	print("MENU_INPUT_TEST_OK keyboard=root+secondary font=pixel hover=debounced+multi_pointer focus=mouse_only audio=shared")
 	quit(0)
 
 

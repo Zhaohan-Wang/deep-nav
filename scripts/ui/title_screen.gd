@@ -211,7 +211,7 @@ func _open_settings() -> void:
 	if _settings != null: return
 	_settings = Control.new(); _settings.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(_settings)
 	var dim := ColorRect.new(); dim.color = Color(0,0,0,0.72); dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); _settings.add_child(dim)
-	var panel := UI.panel(); panel.set_anchors_preset(Control.PRESET_CENTER); panel.position = Vector2(-390,-390); panel.size = Vector2(780,780); _settings.add_child(panel)
+	var panel := UI.panel(); panel.set_anchors_preset(Control.PRESET_CENTER); panel.position = Vector2(-420,-430); panel.size = Vector2(840,860); _settings.add_child(panel)
 	var box := VBoxContainer.new(); box.add_theme_constant_override("separation", 18); panel.add_child(box)
 	box.add_child(UI.label("系统设置", 38, UI.CYAN))
 	box.add_child(_toggle("画面震动", Game.screen_shake_enabled, func(v): Game.screen_shake_enabled = v))
@@ -221,7 +221,119 @@ func _open_settings() -> void:
 	box.add_child(_slider("主音量", 0, 100, Game.master_volume * 100.0, func(v): Game.master_volume = v / 100.0, "%d%%"))
 	box.add_child(_slider("航点冷却", 1, 5, Game.waypoint_cooldown_s, func(v): Game.waypoint_cooldown_s = v, "%.0f 秒"))
 	box.add_child(_slider("航点最大距离", 24, 140, Game.waypoint_max_distance, func(v): Game.waypoint_max_distance = v, "%.0f 单位"))
+	box.add_child(_input_device_section())
 	var done := UI.button("保存并返回", Vector2(360,72), true); UI.set_button_audio_cue(done,"popup_close"); done.pressed.connect(_close_settings); box.add_child(done)
+
+
+## 输入设备区：显示当前鼠标/键盘席位分配，提供翻转按钮和键盘识别测试。
+func _input_device_section() -> Control:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+
+	# 标题行
+	var title_row := HBoxContainer.new()
+	title_row.add_child(UI.label("─── 输入设备", 22, UI.MUTED))
+	col.add_child(title_row)
+
+	# ---- 鼠标区 ----
+	var mouse_row := HBoxContainer.new()
+	mouse_row.add_theme_constant_override("separation", 12)
+	var mouse_col := VBoxContainer.new()
+	mouse_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mouse_col.add_theme_constant_override("separation", 4)
+
+	# 刷新鼠标标签（每次打开设置时显示当前连接状态）
+	var mouse_a_label := UI.label(_mouse_seat_text(0), 20, UI.TEXT)
+	var mouse_b_label := UI.label(_mouse_seat_text(1), 20, UI.TEXT)
+	mouse_col.add_child(mouse_a_label)
+	mouse_col.add_child(mouse_b_label)
+	mouse_row.add_child(mouse_col)
+
+	var swap_btn := UI.button("翻转鼠标", Vector2(180, 56))
+	UI.set_button_audio_cue(swap_btn, "choice")
+	swap_btn.pressed.connect(func() -> void:
+		RawMice.swap_mouse_seats()
+		mouse_a_label.text = _mouse_seat_text(0)
+		mouse_b_label.text = _mouse_seat_text(1)
+	)
+	mouse_row.add_child(swap_btn)
+	col.add_child(mouse_row)
+
+	# ---- 键盘区 ----
+	var kb_col := VBoxContainer.new()
+	kb_col.add_theme_constant_override("separation", 4)
+	kb_col.add_child(UI.label(_keyboard_seat_text(0), 20, UI.TEXT))
+	kb_col.add_child(UI.label(_keyboard_seat_text(1), 20, UI.TEXT))
+	col.add_child(kb_col)
+
+	# ---- 键盘识别测试 ----
+	col.add_child(UI.label("键盘识别测试：按住任意键盘上的 Shift 键", 19, UI.MUTED))
+	var indicator_row := HBoxContainer.new()
+	indicator_row.add_theme_constant_override("separation", 16)
+
+	var ind_a := _kbd_indicator("屏幕 A", false)
+	var ind_b := _kbd_indicator("屏幕 B", false)
+	indicator_row.add_child(ind_a)
+	indicator_row.add_child(ind_b)
+	col.add_child(indicator_row)
+
+	# 用 HID key 实时轮询，避免依赖 F/快捷键
+	var timer := col.create_tween().set_loops()
+	timer.tween_callback(func() -> void:
+		var a_held := RawMice.is_hid_key_pressed(0, 0x02)  # HID Shift
+		var b_held := RawMice.is_hid_key_pressed(1, 0x02)
+		_update_kbd_indicator(ind_a, a_held)
+		_update_kbd_indicator(ind_b, b_held)
+	).set_delay(0.05)
+	col.add_child(Control.new())  # 底部留白
+
+	return col
+
+
+func _mouse_seat_text(seat: int) -> String:
+	var name := RawMice.device_name(seat)
+	return "鼠标 %s → 屏幕 %s" % [
+		"A" if seat == 0 else "B",
+		"A" if seat == 0 else "B",
+	] + ("：" + name if not name.is_empty() else "（未连接）")
+
+
+func _keyboard_seat_text(seat: int) -> String:
+	var name := RawMice.keyboard_name(seat)
+	return "键盘 %s → 屏幕 %s" % [
+		"A" if seat == 0 else "B",
+		"A" if seat == 0 else "B",
+	] + ("：" + name if not name.is_empty() else "（未连接）")
+
+
+func _kbd_indicator(label_text: String, active: bool) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(180, 56)
+	var style := StyleBoxFlat.new()
+	style.bg_color = UI.CYAN if active else UI.PANEL_2
+	style.border_color = UI.CYAN
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(4)
+	style.content_margin_left = 12; style.content_margin_right = 12
+	style.content_margin_top = 8; style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", style)
+	panel.set_meta("kbd_style", style)
+	var lbl := UI.label(label_text, 22, UI.BG if active else UI.MUTED)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_child(lbl)
+	panel.set_meta("kbd_label", lbl)
+	return panel
+
+
+func _update_kbd_indicator(panel: PanelContainer, active: bool) -> void:
+	var style := panel.get_meta("kbd_style") as StyleBoxFlat
+	var lbl := panel.get_meta("kbd_label") as Label
+	var was_active := style.bg_color == UI.CYAN
+	if was_active == active:
+		return
+	style.bg_color = UI.CYAN if active else UI.PANEL_2
+	lbl.add_theme_color_override("font_color", UI.BG if active else UI.MUTED)
 
 func _toggle(text: String, value: bool, changed: Callable) -> Control:
 	var row := HBoxContainer.new(); var label := UI.label(text, 23); label.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(label)

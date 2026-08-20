@@ -18,7 +18,7 @@ var _bridge_pid: int = -1
 var _devices: Dictionary = {}
 var _keyboards: Dictionary = {}
 var _pressed_keys: Dictionary = {0: {}, 1: {}}
-## 鼠标允许 F6 校正左右；键盘固定为内置=A、外接=B，绝不跟随鼠标交换。
+## 鼠标席位通过设置页面按钮翻转；键盘固定为内置=A、外接=B，绝不跟随鼠标交换。
 var _mouse_slots_to_seats: Dictionary = {0: 0, 1: 1}
 var _bridge_ready: bool = false
 var _platform_supported: bool = false

@@ -13,6 +13,14 @@ func _run() -> void:
 	var displays := root.get_node("/root/Displays")
 	await process_frame
 
+	# 覆盖启动时序：RawMice 是更早加载的 autoload。即使设备已经在其字典中，
+	# Displays 没收到早期 signal，也必须主动恢复原始双鼠标模式。
+	raw.set("_bridge_ready", true)
+	raw.set("_devices", {0: "Early Mouse A", 1: "Early Mouse B"})
+	displays.set("_raw_mouse_mode", false)
+	displays.call("_sync_raw_mouse_state")
+	assert(displays.uses_raw_mouse_mode(), "display startup did not recover two already-known raw mice")
+
 	# 模拟桥先完成握手，再分别报告两个物理鼠标。测试前清空单例状态，
 	# 避免未来有其他测试复用进程时污染设备映射。
 	raw.set("_devices", {})
@@ -33,7 +41,7 @@ func _run() -> void:
 		"product": "Regression Mouse B",
 	})
 	assert(raw.connected_mouse_count() == 2, "raw bridge slots must remain two devices")
-	assert(bool(displays.get("_raw_mouse_mode")), "two raw mice must enable separated mode")
+	assert(displays.uses_raw_mouse_mode(), "two ready raw mice must enable separated mode")
 
 	displays.show_shared_page()
 	displays.call("_center_shared_cursors")
