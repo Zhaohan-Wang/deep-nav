@@ -45,10 +45,23 @@ cat > "$ENTITLEMENTS" <<'PLIST'
 </plist>
 PLIST
 
+# 必须用稳定的开发者证书签名。临时签名（-）每次打包都会改变签名指纹，
+# macOS 会把新包当成陌生应用、作废已授予的「输入监控」权限，导致双鼠标
+# 桥接进程被系统拒绝（kIOReturnNotPermitted），两只鼠标退化成一只合并指针。
+SIGN_IDENTITY="${DEEPNAV_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' 'NR==1 {print $2}')}"
+if [[ -z "$SIGN_IDENTITY" ]]; then
+	print -u2 "未找到代码签名证书；打包中止。临时签名会在每次重打包后丢失输入监控权限。"
+	print -u2 "请安装 Apple Development 证书，或设置 DEEPNAV_SIGN_IDENTITY 后重试。"
+	exit 1
+fi
+print "Signing with identity: $SIGN_IDENTITY"
+
 xattr -cr "$APP"
-codesign --force --sign - "$HELPERS/deepnav-hid-mouse-bridge"
-codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$HELPERS/DeepNavAudioRecorder.app"
-codesign --force --sign - --preserve-metadata=identifier,entitlements,flags "$APP"
+codesign --force --sign "$SIGN_IDENTITY" \
+	--identifier "com.zhaohanwang.deepnav.hid-mouse-bridge" \
+	"$HELPERS/deepnav-hid-mouse-bridge"
+codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements "$ENTITLEMENTS" "$HELPERS/DeepNavAudioRecorder.app"
+codesign --force --sign "$SIGN_IDENTITY" --preserve-metadata=identifier,entitlements,flags "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 cat > "$DIST_ROOT/实验数据位置.txt" <<'TEXT'

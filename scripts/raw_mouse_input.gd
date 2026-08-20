@@ -27,7 +27,7 @@ var _bind_retry_elapsed: float = 0.0
 
 
 func _ready() -> void:
-	# 暂停菜单仍要接收两只鼠标和两个键盘的原始输入。
+	# 仅保证暂停菜单期间 HID 桥继续取包；slot 到 seat 的基线映射保持不变。
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if DisplayServer.get_name() == "headless":
 		return

@@ -1,0 +1,32 @@
+---
+description: macOS 重新打包后必须重新处理 TCC 权限（输入监控、麦克风等）
+alwaysApply: true
+---
+
+# macOS 打包与系统权限（TCC）
+
+## 核心事实
+
+macOS 按「Bundle ID + 代码签名指纹」识别应用并记住权限授权。签名一变，之前授予的
+输入监控（双鼠标 HID 桥）、麦克风（录音）等权限全部作废——应用不会报错弹窗，
+而是静默降级（例如双鼠标合并成一只、录音无声）。
+
+2026-08-20 曾因此浪费数小时排查"双鼠标合并"假回归：日志表现为
+`RAW_MOUSE_BRIDGE ready=false code=-536870174`（kIOReturnNotPermitted），
+根因是重打包后签名变化导致输入监控授权失效，与游戏代码无关。
+
+## 必须遵守
+
+1. **打包必须用稳定证书签名**，禁止临时签名（`codesign --sign -`）。
+   `tools/package_macos.sh` 已改为自动选用本机 Apple Development 证书
+   （可用 `DEEPNAV_SIGN_IDENTITY` 覆盖）。临时签名每次打包指纹都变，权限每次都丢。
+2. **每次重新打包交付后，提醒用户重新确认权限**：首次启动新包时在
+   系统设置 → 隐私与安全性 中重新允许「输入监控」和「麦克风」。
+   即使用了稳定证书，也要提醒用户验证一次（证书更换、entitlements 变化同样会触发失效）。
+3. **授权状态陈旧导致不弹窗时**，先清掉旧记录再启动：
+   `tccutil reset ListenEvent com.zhaohanwang.deepnav`（输入监控）、
+   `tccutil reset Microphone com.zhaohanwang.deepnav`（麦克风）。
+4. **排查"打包版鼠标/录音坏了"时，先查权限再查代码**：
+   读 `~/Library/Application Support/Godot/app_userdata/DeepNav/logs/` 最新日志，
+   看 `RAW_MOUSE_BRIDGE ready=` 一行；`ready=false code=-536870174` 即权限问题。
+   注意：从终端/编辑器启动时权限算在终端头上，必须用 `open` 以 .app 方式启动才能复现。
