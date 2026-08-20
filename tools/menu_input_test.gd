@@ -88,8 +88,8 @@ func _run() -> void:
 	var first_run := title.find_child("FirstRunSettings",true,false)
 	var confirm := title.find_child("ConfirmFirstRunSettings",true,false) as Button
 	assert(first_run!=null and confirm!=null,"versioned first-run preferences must be available")
-	assert(_visible_text(first_run).contains("输入监控") and _visible_text(first_run).contains("麦克风"),
-		"first-run preferences must explain macOS permissions")
+	assert(_visible_text(first_run).contains("输入监控") and not _visible_text(first_run).contains("麦克风"),
+		"first-run preferences must explain input monitoring without microphone access")
 	print("MENU_INPUT_TEST_OK keyboard=root+secondary font=pixel hover=debounced+multi_pointer focus=mouse_only audio=shared")
 	quit(0)
 

@@ -11,6 +11,8 @@ const DASH_WIDTH_RATIO: float = 0.66
 const DASH_MAX_WIDTH: float = 920.0
 const DASH_MIN_WIDTH: float = 420.0
 const DASH_BOTTOM_RATIO: float = 0.80
+const MissionStatusBarScript = preload("res://scripts/ui/mission_status_bar.gd")
+const ExperimentNoticeBannerScript = preload("res://scripts/ui/experiment_notice_banner.gd")
 
 ## 告警优先级：抵达 / 解体 > 刚撞上 > 接近障碍 > 默认指挥提示。
 enum AlertKind {
@@ -42,6 +44,7 @@ var _impact_hold: float = 0.0
 var _relay_hold: float = 0.0
 var _experiment_hold: float = 0.0
 var _experiment_notice: String = ""
+var _experiment_banner: Control
 var _proximity_on: bool = false
 
 
@@ -79,6 +82,9 @@ func _build() -> void:
 	add_child(stages)
 	stages.setup(porthole_host, _dashboard, _make_banner(), UiStyle.make_view_overlay(UiStyle.PILOT_VIEW_PATH))
 	add_child(UiStyle.make_role_badge(UiStyle.PILOT_BADGE_PATH))
+	add_child(MissionStatusBarScript.new())
+	_experiment_banner = ExperimentNoticeBannerScript.new()
+	add_child(_experiment_banner)
 
 	# 3D 摇杆单独一层，压在 Pad View / 仪表 / 徽章上面，白屏遮罩仍在其上。
 	stick_host = Control.new()
@@ -155,9 +161,8 @@ func _refresh_alert() -> void:
 
 
 func show_experiment_notice(message: String) -> void:
-	_experiment_notice = message
-	_experiment_hold = 4.2
-	_refresh_alert()
+	if _experiment_banner != null:
+		_experiment_banner.call("show_message",message,3.0)
 
 
 ## 接近致死行星时为 true；带进入/退出回差，避免在警戒圈边缘来回跳。

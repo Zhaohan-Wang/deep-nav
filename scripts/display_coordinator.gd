@@ -72,12 +72,14 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	_build_secondary_window()
 	_build_shared_pointer_overlay()
-	RawMice.mouse_motion.connect(_on_raw_mouse_motion)
-	RawMice.mouse_button.connect(_on_raw_mouse_button)
-	RawMice.mouse_wheel.connect(_on_raw_mouse_wheel)
-	RawMice.device_changed.connect(_on_raw_mouse_device_changed)
-	RawMice.keyboard_device_changed.connect(_on_raw_keyboard_device_changed)
-	RawMice.bridge_status.connect(_on_raw_mouse_bridge_status)
+	var raw_mice := _raw_mice()
+	if raw_mice != null:
+		raw_mice.connect("mouse_motion",_on_raw_mouse_motion)
+		raw_mice.connect("mouse_button",_on_raw_mouse_button)
+		raw_mice.connect("mouse_wheel",_on_raw_mouse_wheel)
+		raw_mice.connect("device_changed",_on_raw_mouse_device_changed)
+		raw_mice.connect("keyboard_device_changed",_on_raw_keyboard_device_changed)
+		raw_mice.connect("bridge_status",_on_raw_mouse_bridge_status)
 	call_deferred("_finish_startup")
 
 
@@ -114,7 +116,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey:
 		var key := event as InputEventKey
-		if key.physical_keycode == KEY_F4 and key.pressed and not key.echo:
+		if key.physical_keycode == KEY_F4 and key.pressed and not key.echo and not Game.experiment_mode:
 			swap_roles()
 			get_viewport().set_input_as_handled()
 		# 鼠标席位翻转已移至设置页面按钮，不再绑定快捷键
@@ -361,6 +363,15 @@ func role_name_for_seat(seat: int) -> String:
 	return "navigator" if role_for_seat(seat) == Role.NAVIGATOR else "pilot"
 
 
+## 合成双鼠标事件带固定 device；真实系统鼠标没有席位信息，交给所在窗口正常命中。
+func pointer_device_matches_role(device: int, role: int) -> bool:
+	if device == PRIMARY_SEAT_POINTER_DEVICE:
+		return primary_role() == role
+	if device == SECONDARY_SEAT_POINTER_DEVICE:
+		return secondary_role() == role
+	return true
+
+
 func seat_cursor_position(seat: int) -> Vector2:
 	return _seat_a_pos if seat == 0 else _seat_b_pos
 
@@ -379,16 +390,18 @@ func pilot_seat() -> int:
 
 func pilot_turn_axis() -> float:
 	var seat := pilot_seat()
-	if RawMice.has_keyboard(seat):
-		return float(RawMice.is_hid_key_pressed(seat, HID_KEY_A)) - float(RawMice.is_hid_key_pressed(seat, HID_KEY_D))
-	return Input.get_axis("turn_right", "turn_left") if not RawMice.is_ready() else 0.0
+	var raw_mice := _raw_mice()
+	if raw_mice != null and bool(raw_mice.call("has_keyboard",seat)):
+		return float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_A)) - float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_D))
+	return Input.get_axis("turn_right", "turn_left") if raw_mice == null or not bool(raw_mice.call("is_ready")) else 0.0
 
 
 func pilot_thrust_axis() -> float:
 	var seat := pilot_seat()
-	if RawMice.has_keyboard(seat):
-		return float(RawMice.is_hid_key_pressed(seat, HID_KEY_W)) - float(RawMice.is_hid_key_pressed(seat, HID_KEY_S))
-	return Input.get_axis("brake", "thrust") if not RawMice.is_ready() else 0.0
+	var raw_mice := _raw_mice()
+	if raw_mice != null and bool(raw_mice.call("has_keyboard",seat)):
+		return float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_W)) - float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_S))
+	return Input.get_axis("brake", "thrust") if raw_mice == null or not bool(raw_mice.call("is_ready")) else 0.0
 
 
 func swap_roles() -> void:
@@ -642,13 +655,15 @@ func _on_raw_mouse_device_changed(_slot: int, _connected: bool, _product: String
 
 
 func _sync_raw_mouse_state() -> void:
-	_raw_mouse_mode = RawMice.is_ready() and RawMice.connected_mouse_count() >= 2
+	var raw_mice := _raw_mice()
+	_raw_mouse_mode = raw_mice != null and bool(raw_mice.call("is_ready")) and int(raw_mice.call("connected_mouse_count")) >= 2
 	if _raw_mouse_mode:
 		_raw_status = "鼠标 A %s · 鼠标 B %s · %s" % [
-			RawMice.device_name(0),RawMice.device_name(1),_keyboard_status(),
+			str(raw_mice.call("device_name",0)),str(raw_mice.call("device_name",1)),_keyboard_status(),
 		]
 	else:
-		_raw_status = "鼠标 %d / 2 · %s" % [RawMice.connected_mouse_count(),_keyboard_status()]
+		var mouse_count := int(raw_mice.call("connected_mouse_count")) if raw_mice != null else 0
+		_raw_status = "鼠标 %d / 2 · %s" % [mouse_count,_keyboard_status()]
 		seat_hover_changed.emit(0, null)
 		seat_hover_changed.emit(1, null)
 	_refresh_cursor_visibility()
@@ -660,12 +675,17 @@ func _on_raw_keyboard_device_changed(_slot: int,_connected: bool,_product: Strin
 
 
 func _keyboard_status() -> String:
-	var a := RawMice.keyboard_name(0)
-	var b := RawMice.keyboard_name(1)
+	var raw_mice := _raw_mice()
+	var a := str(raw_mice.call("keyboard_name",0)) if raw_mice != null else ""
+	var b := str(raw_mice.call("keyboard_name",1)) if raw_mice != null else ""
 	return "键盘 A（内置）%s · 键盘 B（外接）%s" % [
 		"✓" if not a.is_empty() else "缺失",
 		"✓" if not b.is_empty() else "缺失",
 	]
+
+
+func _raw_mice() -> Node:
+	return get_node_or_null("/root/RawMice")
 
 
 func _on_raw_mouse_bridge_status(ready: bool, message: String) -> void:

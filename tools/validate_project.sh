@@ -3,61 +3,156 @@ set -euo pipefail
 
 PROJECT_ROOT="${0:A:h:h}"
 GODOT_LAUNCHER="$PROJECT_ROOT/tools/godot-cli"
-RUN_LOG="$(mktemp /private/tmp/deep-nav-validate.XXXXXX)"
-ENGINE_LOG="$(mktemp /private/tmp/deep-nav-engine.XXXXXX)"
-trap 'rm -f "$RUN_LOG" "$ENGINE_LOG"' EXIT
+TEST_QUIT_FRAMES=1800
+FATAL_PATTERN='SCRIPT ERROR|Parse Error|SHADER ERROR|Shader compilation failed|Failed to load script|Cannot open file.*res://'
+RUN_FULL=false
+RUN_MAPS=false
+RUN_PERFORMANCE=false
+PASSED=0
+SUITE_STARTED=$SECONDS
 
-"$GODOT_LAUNCHER" \
-	--headless \
-	--log-file "$ENGINE_LOG" \
-	--path "$PROJECT_ROOT" \
-	--quit-after 8 \
-	-- --dual-window-smoke >"$RUN_LOG" 2>&1
+FAST_TESTS=(
+	"流程冒烟|res://tools/flow_smoke.gd|FLOW_SMOKE_OK"
+	"任务流程|res://tools/mission_flow_test.gd|MISSION_FLOW_OK"
+	"四关问卷|res://tools/four_mission_questionnaire_test.gd|FOUR_MISSION_QUESTIONNAIRE_OK"
+	"碎石带一致性|res://tools/belt_consistency_test.gd|BELT_CONSISTENCY_OK"
+	"碎石伤害|res://tools/asteroid_belt_gameplay_test.gd|ASTEROID_BELT_GAMEPLAY_OK"
+	"飞船转向|res://tools/ship_turning_test.gd|SHIP_TURNING_OK"
+	"实验数据链路|res://tools/experiment_pipeline_test.gd|EXPERIMENT_PIPELINE_TEST_OK"
+	"菜单与设置|res://tools/menu_input_test.gd|MENU_INPUT_TEST_OK"
+	"性能结构预算|res://tools/performance_budget_test.gd|PERFORMANCE_BUDGET_OK"
+)
 
-cat "$RUN_LOG"
+MAP_TESTS=(
+	"关卡目录|res://tools/mission_audit.gd|MISSION_CATALOG_OK count=5"
+	"边界封闭|res://tools/boundary_physics_test.gd|BOUNDARY_PHYSICS_OK"
+	"导航难度|res://tools/navigation_difficulty_test.gd|NAVIGATION_DIFFICULTY_OK missions=5"
+	"碎石带风险|res://tools/asteroid_belt_hazard_test.gd|ASTEROID_BELT_HAZARD_OK"
+)
 
-# macOS 沙箱中的证书和退出期 Dummy renderer 泄漏是环境噪声；
-# 这里只把会破坏项目运行的解析、脚本、资源和 shader 错误视为失败。
-if rg -n \
-	'SCRIPT ERROR|Parse Error|SHADER ERROR|Shader compilation failed|Failed to load script|Cannot open file.*res://' \
-	"$RUN_LOG" "$ENGINE_LOG"; then
-	print -u2 "DEEP_NAV_VALIDATION_FAILED"
-	exit 1
+SPECIALTY_TESTS=(
+	"被试隐私|res://tools/participant_ui_privacy_test.gd|PARTICIPANT_UI_PRIVACY_OK missions=5"
+	"视觉资源|res://tools/visual_asset_test.gd|VISUAL_ASSET_OK"
+	"航点行为|res://tools/waypoint_behavior_test.gd|WAYPOINT_BEHAVIOR_OK"
+	"航点投影|res://tools/billboard_projection_test.gd|BILLBOARD_PROJECTION_OK"
+	"船体反馈|res://tools/hull_feedback_test.gd|HULL_RING_FEEDBACK_OK"
+	"实验视觉反馈|res://tools/experiment_visual_feedback_test.gd|EXPERIMENT_VISUAL_FEEDBACK_OK"
+	"岗位认领|res://tools/role_claim_test.gd|ROLE_CLAIM_OK"
+	"实验进度|res://tools/session_progress_test.gd|SESSION_PROGRESS_OK missions=5"
+	"双鼠标分流|res://tools/raw_mouse_separation_test.gd|RAW_MOUSE_SEPARATION_OK slots=2 seats=2 cursors=independent"
+	"双键盘分流|res://tools/keyboard_seat_test.gd|KEYBOARD_SEAT_TEST_OK"
+	"音频系统|res://tools/audio_system_test.gd|AUDIO_SYSTEM_TEST_OK"
+	"暂停菜单|res://tools/pause_menu_test.gd|PAUSE_MENU_TEST_OK"
+)
+
+usage() {
+	print "用法: tools/validate_project.sh [--maps] [--full] [--performance]"
+	print "  默认          只跑日常关键回归"
+	print "  --maps        再跑地图、边界和难度检查"
+	print "  --full        再跑全部专项回归（包含 --maps）"
+	print "  --performance 关键回归通过后实测五关帧率"
+}
+
+for argument in "$@"; do
+	case "$argument" in
+		--maps) RUN_MAPS=true ;;
+		--full) RUN_FULL=true; RUN_MAPS=true ;;
+		--performance) RUN_PERFORMANCE=true ;;
+		--help|-h) usage; exit 0 ;;
+		*) print -u2 "未知参数: $argument"; usage >&2; exit 2 ;;
+	esac
+done
+
+print_failure_logs() {
+	local run_log="$1"
+	local engine_log="$2"
+	print -u2 "最近的测试输出："
+	tail -80 "$run_log" >&2 2>/dev/null || true
+	print -u2 "最近的引擎输出："
+	tail -80 "$engine_log" >&2 2>/dev/null || true
+}
+
+run_startup_smoke() {
+	local run_log engine_log command_status started
+	run_log="$(mktemp /private/tmp/deep-nav-startup.XXXXXX)"
+	engine_log="$(mktemp /private/tmp/deep-nav-startup-engine.XXXXXX)"
+	started=$SECONDS
+	set +e
+	"$GODOT_LAUNCHER" \
+		--headless \
+		--log-file "$engine_log" \
+		--path "$PROJECT_ROOT" \
+		--quit-after 8 \
+		-- --dual-window-smoke >"$run_log" 2>&1
+	command_status=$?
+	set -e
+	if (( command_status != 0 )) || rg -q "$FATAL_PATTERN" "$run_log" "$engine_log"; then
+		print -u2 "FAIL 项目启动（$((SECONDS - started)) 秒）"
+		print_failure_logs "$run_log" "$engine_log"
+		rm -f "$run_log" "$engine_log"
+		exit 1
+	fi
+	rm -f "$run_log" "$engine_log"
+	(( PASSED += 1 ))
+	print "PASS 项目启动（$((SECONDS - started)) 秒）"
+}
+
+run_test() {
+	local name="$1"
+	local script="$2"
+	local sentinel="$3"
+	local run_log engine_log command_status started
+	run_log="$(mktemp /private/tmp/deep-nav-test.XXXXXX)"
+	engine_log="$(mktemp /private/tmp/deep-nav-test-engine.XXXXXX)"
+	started=$SECONDS
+	set +e
+	"$GODOT_LAUNCHER" \
+		--headless \
+		--log-file "$engine_log" \
+		--path "$PROJECT_ROOT" \
+		--quit-after "$TEST_QUIT_FRAMES" \
+		--script "$script" >"$run_log" 2>&1
+	command_status=$?
+	set -e
+	if (( command_status != 0 )) || ! rg -q -F "$sentinel" "$run_log" || rg -q "$FATAL_PATTERN" "$run_log" "$engine_log"; then
+		print -u2 "FAIL $name（$((SECONDS - started)) 秒）"
+		print_failure_logs "$run_log" "$engine_log"
+		rm -f "$run_log" "$engine_log"
+		exit 1
+	fi
+	rm -f "$run_log" "$engine_log"
+	(( PASSED += 1 ))
+	print "PASS $name（$((SECONDS - started)) 秒）"
+}
+
+run_specs() {
+	local spec name remainder script sentinel
+	for spec in "$@"; do
+		name="${spec%%|*}"
+		remainder="${spec#*|}"
+		script="${remainder%%|*}"
+		sentinel="${remainder#*|}"
+		run_test "$name" "$script" "$sentinel"
+	done
+}
+
+print "开始日常关键回归"
+run_startup_smoke
+run_specs "${FAST_TESTS[@]}"
+
+if [[ "$RUN_MAPS" == true ]]; then
+	print "开始地图专项回归"
+	run_specs "${MAP_TESTS[@]}"
 fi
 
-print "DEEP_NAV_VALIDATION_OK"
+if [[ "$RUN_FULL" == true ]]; then
+	print "开始完整专项回归"
+	run_specs "${SPECIALTY_TESTS[@]}"
+fi
 
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/flow_smoke.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/participant_ui_privacy_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/visual_asset_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/waypoint_behavior_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/mission_flow_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/mission_audit.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/boundary_physics_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/belt_consistency_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/navigation_difficulty_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/billboard_projection_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/asteroid_belt_hazard_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/asteroid_belt_gameplay_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/hull_feedback_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/role_claim_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/session_progress_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/experiment_pipeline_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/menu_input_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/raw_mouse_separation_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/keyboard_seat_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/audio_system_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/pause_menu_test.gd >>"$RUN_LOG" 2>&1
-"$GODOT_LAUNCHER" --headless --log-file "$ENGINE_LOG" --path "$PROJECT_ROOT" --script res://tools/performance_budget_test.gd >>"$RUN_LOG" 2>&1
-cat "$RUN_LOG"
-if rg -n \
-	'SCRIPT ERROR|Parse Error|SHADER ERROR|Shader compilation failed|Failed to load script|Cannot open file.*res://' \
-	"$RUN_LOG" "$ENGINE_LOG"; then
-	print -u2 "DEEP_NAV_FULL_VALIDATION_FAILED"
-	exit 1
+if [[ "$RUN_PERFORMANCE" == true ]]; then
+	print "开始五关图形性能实测"
+	"$PROJECT_ROOT/tools/validate_performance.sh"
 fi
-if ! rg -q 'FLOW_SMOKE_OK' "$RUN_LOG" || ! rg -q 'PARTICIPANT_UI_PRIVACY_OK missions=5' "$RUN_LOG" || ! rg -q 'VISUAL_ASSET_OK' "$RUN_LOG" || ! rg -q 'WAYPOINT_BEHAVIOR_OK' "$RUN_LOG" || ! rg -q 'MISSION_FLOW_OK' "$RUN_LOG" || ! rg -q 'MISSION_CATALOG_OK count=5' "$RUN_LOG" || ! rg -q 'BOUNDARY_PHYSICS_OK' "$RUN_LOG" || ! rg -q 'BELT_CONSISTENCY_OK' "$RUN_LOG" || ! rg -q 'NAVIGATION_DIFFICULTY_OK missions=5' "$RUN_LOG" || ! rg -q 'BILLBOARD_PROJECTION_OK' "$RUN_LOG" || ! rg -q 'ASTEROID_BELT_HAZARD_OK' "$RUN_LOG" || ! rg -q 'ASTEROID_BELT_GAMEPLAY_OK' "$RUN_LOG" || ! rg -q 'HULL_RING_FEEDBACK_OK' "$RUN_LOG" || ! rg -q 'ROLE_CLAIM_OK' "$RUN_LOG" || ! rg -q 'SESSION_PROGRESS_OK missions=5' "$RUN_LOG" || ! rg -q 'EXPERIMENT_PIPELINE_TEST_OK' "$RUN_LOG" || ! rg -q 'MENU_INPUT_TEST_OK' "$RUN_LOG" || ! rg -q 'RAW_MOUSE_SEPARATION_OK slots=2 seats=2 cursors=independent' "$RUN_LOG" || ! rg -q 'KEYBOARD_SEAT_TEST_OK' "$RUN_LOG" || ! rg -q 'AUDIO_SYSTEM_TEST_OK' "$RUN_LOG" || ! rg -q 'PAUSE_MENU_TEST_OK' "$RUN_LOG" || ! rg -q 'PERFORMANCE_BUDGET_OK' "$RUN_LOG"; then
-	print -u2 "DEEP_NAV_FULL_VALIDATION_FAILED: smoke or mission audit did not reach its success sentinel"
-	exit 1
-fi
-print "DEEP_NAV_FULL_VALIDATION_OK"
+
+print "DEEP_NAV_VALIDATION_OK tests=$PASSED elapsed=$((SECONDS - SUITE_STARTED))s"

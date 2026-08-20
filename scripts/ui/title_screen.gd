@@ -245,7 +245,7 @@ func _open_first_run_setup() -> void:
 		Game.save_settings()
 	))
 	var permission := UI.label(
-		"macOS 权限说明\n双鼠标：需要“输入监控”（不是“辅助功能”）\n实验录音：需要“麦克风”\n系统会在首次实际使用时询问；授权后请完全退出并重新打开 DeepNav。",
+		"macOS 权限说明\n双鼠标：需要“输入监控”（不是“辅助功能”）\n系统会在首次实际使用时询问；授权后请完全退出并重新打开 DeepNav。",
 		20,UI.AMBER
 	)
 	permission.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -275,8 +275,9 @@ func _open_settings() -> void:
 	display_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(display_status)
 	box.add_child(_slider("主音量", 0, 100, Game.master_volume * 100.0, func(v): Game.master_volume = v / 100.0, "%d%%"))
-	box.add_child(_slider("航点冷却", 1, 5, Game.waypoint_cooldown_s, func(v): Game.waypoint_cooldown_s = v, "%.0f 秒"))
-	box.add_child(_slider("航点最大距离", 24, 140, Game.waypoint_max_distance, func(v): Game.waypoint_max_distance = v, "%.0f 单位"))
+	if not Game.experiment_mode:
+		box.add_child(_slider("航点冷却", 1, 5, Game.waypoint_cooldown_s, func(v): Game.waypoint_cooldown_s = v, "%.0f 秒"))
+		box.add_child(_slider("航点最大距离", 24, 140, Game.waypoint_max_distance, func(v): Game.waypoint_max_distance = v, "%.0f 单位"))
 	box.add_child(_input_device_section())
 	var done := UI.button("保存并返回", Vector2(360,72), true); UI.set_button_audio_cue(done,"popup_close"); done.pressed.connect(_close_settings); box.add_child(done)
 

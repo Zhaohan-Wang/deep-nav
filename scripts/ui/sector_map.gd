@@ -9,6 +9,11 @@ var _ship_icon: Sprite2D
 var _engine_icon: Sprite2D
 var _map_rect: Rect2 = Rect2()
 var _overlay: Control
+var _belt_viewport: SubViewport
+var _belt_sprite: Sprite2D
+var _belt_world_rect: Rect2 = Rect2()
+var _belt_bake_scale: float = 0.0
+var _belt_bake_sector: String = ""
 var _grid_material: ShaderMaterial
 var _space_material: ShaderMaterial
 var _focus_world: Vector3 = Vector3.ZERO
@@ -59,6 +64,22 @@ func _build_layers() -> void:
 	grid.material = _grid_material
 	grid.color = Color(1.0, 1.0, 1.0, 1.0)
 	add_child(grid)
+
+	# 危险带是静态世界几何：整关一次烘焙成纹理，主星图每帧只提交一个 Sprite。
+	# 飞船、航点、雷达、目标信标仍由动态覆盖层实时绘制。
+	_belt_viewport = SubViewport.new()
+	_belt_viewport.transparent_bg = true
+	_belt_viewport.disable_3d = true
+	_belt_viewport.handle_input_locally = false
+	_belt_viewport.gui_disable_input = true
+	_belt_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	add_child(_belt_viewport)
+	_belt_sprite = Sprite2D.new()
+	_belt_sprite.name = "BakedBeltLayer"
+	_belt_sprite.centered = false
+	_belt_sprite.texture = _belt_viewport.get_texture()
+	_belt_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	add_child(_belt_sprite)
 
 	_bodies_layer = Control.new()
 	_bodies_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -111,6 +132,7 @@ func _spawn_planets() -> void:
 func _relayout() -> void:
 	_map_rect = Rect2(Vector2.ZERO, size)
 	var scale_px: float = Game.map_pixels_per_unit(_map_rect.size)
+	_ensure_belt_bake(scale_px)
 	_fit_ship_icon(scale_px)
 	_update_grid(scale_px)
 	_position_world_items()
@@ -118,6 +140,7 @@ func _relayout() -> void:
 
 func _position_world_items() -> void:
 	var scale_px: float = Game.map_pixels_per_unit(_map_rect.size)
+	_position_belt_texture(scale_px)
 	for host: Node in _bodies_layer.get_children():
 		if not (host is Control):
 			continue
@@ -142,6 +165,60 @@ func _position_world_items() -> void:
 	if _overlay != null:
 		_overlay.queue_redraw()
 	_update_grid(scale_px)
+
+
+func _ensure_belt_bake(display_scale: float) -> void:
+	if (_belt_viewport==null or _belt_sprite==null or Game.current_sector==null
+			or size.x<1.0 or size.y<1.0 or display_scale<=0.0):
+		return
+	var sector_id:=Game.current_sector.id
+	if _belt_bake_sector==sector_id and absf(_belt_bake_scale-display_scale)<0.001:
+		return
+	_belt_bake_sector=sector_id
+	_belt_world_rect=_belt_bounds()
+	var world_size:=_belt_world_rect.size
+	var bake_scale:=display_scale
+	var longest_px:=maxf(world_size.x,world_size.y)*bake_scale
+	if longest_px>4096.0:
+		bake_scale*=4096.0/longest_px
+	_belt_bake_scale=bake_scale
+	var bake_size:=Vector2i(
+		maxi(1,int(ceil(world_size.x*bake_scale))),
+		maxi(1,int(ceil(world_size.y*bake_scale)))
+	)
+	_belt_viewport.size=bake_size
+	for child: Node in _belt_viewport.get_children():
+		_belt_viewport.remove_child(child)
+		child.queue_free()
+	var bake:=Control.new()
+	bake.name="StaticBeltBake"
+	bake.set_script(load("res://scripts/ui/sector_map_overlay.gd") as Script)
+	bake.set("static_belt_bake",true)
+	bake.set("bake_world_rect",_belt_world_rect)
+	bake.set("bake_scale_px",bake_scale)
+	bake.size=Vector2(bake_size)
+	bake.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	_belt_viewport.add_child(bake)
+	_belt_viewport.render_target_update_mode=SubViewport.UPDATE_ONCE
+	_belt_sprite.texture=_belt_viewport.get_texture()
+	_position_belt_texture(display_scale)
+
+
+func _belt_bounds() -> Rect2:
+	for belt: BeltData in Game.current_sector.belts:
+		if not belt.is_boundary:
+			continue
+		var half:=Vector2(belt.outer_radius*maxf(belt.aspect,0.01),belt.outer_radius)+Vector2.ONE*8.0
+		return Rect2(Vector2(belt.center.x,belt.center.z)-half,half*2.0)
+	var half:=Vector2.ONE*(Game.current_sector.world_half+8.0)
+	return Rect2(-half,half*2.0)
+
+
+func _position_belt_texture(display_scale: float) -> void:
+	if _belt_sprite==null or _belt_bake_scale<=0.0:
+		return
+	_belt_sprite.scale=Vector2.ONE*(display_scale/_belt_bake_scale)
+	_belt_sprite.position=world_to_map(Vector3(_belt_world_rect.position.x,0.0,_belt_world_rect.position.y))
 
 
 func _update_grid(scale_px: float) -> void:
@@ -202,6 +279,10 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse := event as InputEventMouseButton
 		if mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT:
+			# 双鼠标合成事件必须来自当前领航员席位；驾驶员空白点击不允许串到星图链路。
+			if not Displays.pointer_device_matches_role(mouse.device, Displays.Role.NAVIGATOR):
+				accept_event()
+				return
 			waypoint_requested.emit(map_to_world(mouse.position))
 			accept_event()
 

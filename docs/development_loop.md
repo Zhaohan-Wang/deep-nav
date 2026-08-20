@@ -1,6 +1,6 @@
 # DeepNav 制作与验证循环
 
-每次修改遵循同一顺序，禁止跳过失败阶段继续堆功能。
+日常迭代只跑能覆盖启动、任务流程、碎石带、飞船操控、实验数据、菜单设置和性能结构的关键回归。地图专项和低频设备专项按改动范围追加，正式打包前才跑完整回归。
 
 1. **数据先行**：在 `MissionCatalog` 写清关卡目标、时限、尝试次数、扰动槽位和路线检查点。
 2. **语义检查**：运行 `tools/mission_audit.gd`，检查 ID、起终点利用率、天体间距、路线是否侵入排斥区、事件门能否覆盖侧向绕行，以及每条小行星带与路线的关系。
@@ -10,19 +10,33 @@
 6. **Metal 图形实跑**：自动截取第四关起点、中段和边界附近的真实分屏 PNG；运行日志中出现脚本、着色器或多边形错误立即失败。
 7. **重写**：任何一层失败都回到相应数据或实现修正，再从第 2 步开始。
 
-统一命令：
+分层命令：
 
 ```bash
+# 日常：9 项关键检查，任一失败立即停止
 tools/validate_project.sh
-tools/validate_runtime.sh
+
+# 修改地图、边界、碎石带或路线时
+tools/validate_project.sh --maps
+
+# 正式打包前
+tools/validate_project.sh --full
+
+# 一次启动依次实测五关，目标 120 FPS；最长 45 秒自动退出
+tools/validate_performance.sh
+
+# 需要一口气完成日常回归和性能实测时
+tools/validate_project.sh --performance
 ```
 
 成功标志：
 
 ```text
-DEEP_NAV_FULL_VALIDATION_OK
-DEEP_NAV_RUNTIME_VALIDATION_OK
+DEEP_NAV_VALIDATION_OK
+PERFORMANCE_VALIDATION_OK
 ```
+
+每个无界面测试都有独立日志和 1800 帧硬退出上限。通过时只显示项目名和耗时；失败时只展开失败项最近的日志，避免一个断言失败后留下长期占用资源的 Godot 进程。
 
 ## 模式边界
 

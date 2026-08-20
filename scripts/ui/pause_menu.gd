@@ -60,10 +60,16 @@ func setup(role: String) -> void:
 	actions.add_theme_constant_override("separation", 9)
 	body.add_child(actions)
 	_add_action(actions, "继续游戏", true, resume_requested, "popup_close")
-	_add_action(actions, "重玩本关", false, restart_requested, "confirm")
-	_add_action(actions, "返回选关", false, level_select_requested, "page_turn")
-	var title_button := _add_action(actions, "返回标题", false, title_requested, "page_turn")
-	title_button.add_theme_color_override("font_color", AppStyle.DANGER)
+	var game := get_node_or_null("/root/Game")
+	var experiment_mode := game != null and bool(game.get("experiment_mode"))
+	var is_practice := game != null and str(game.get("selected_mission_id")) == "practice"
+	if experiment_mode and is_practice:
+		_add_action(actions, "回到角色选择", false, level_select_requested, "page_turn")
+	elif not experiment_mode:
+		_add_action(actions, "重玩本关", false, restart_requested, "confirm")
+		_add_action(actions, "返回选关", false, level_select_requested, "page_turn")
+		var title_button := _add_action(actions, "返回标题", false, title_requested, "page_turn")
+		title_button.add_theme_color_override("font_color", AppStyle.DANGER)
 
 
 func _add_action(

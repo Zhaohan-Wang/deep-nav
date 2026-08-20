@@ -23,8 +23,8 @@ static func practice() -> SectorData:
 	s.display_name = "训练航道"
 	s.participant_name = "训练航道"
 	s.briefing = "训练任务：确认角色分工，沿开阔航线抵达绿洲。"
-	s.participant_briefing = "确认角色分工，沿开阔航线抵达绿洲近空。"
-	s.participant_hint = "先用短距离航点建立共同节奏，确认双方都理解当前分工。"
+	s.participant_briefing = "熟悉两种岗位的配合方式，沿开阔航线抵达绿洲近空。"
+	s.participant_hint = "先设置较近的航点，熟悉沟通、转向和航点更新。"
 	s.map_view_half = 110.0
 	s.spawn_position = Vector3(-170, 0, 55)
 	_move_body(s, "haven", Vector3(170, 0, -55))
@@ -49,8 +49,8 @@ static func level_1() -> SectorData:
 	_meta(s, "level_1", 1, "织环航道", "正常协作", 160.0, PackedStringArray(),
 		"建立无扰动基线；三枚织环依次挡住直航线，必须分别绕行南—北—南，整体航程显著拉长。")
 	s.participant_name = "织环航道"
-	s.participant_briefing = "依次绕过三枚织环尘带，将飞船送至绿洲近空。"
-	s.participant_hint = "每一枚环带都要单独决定绕行侧，不要一次指向终点。"
+	s.participant_briefing = "依次绕过三处环形尘带，将飞船送至绿洲近空。"
+	s.participant_hint = "每次先规划眼前一处尘带，绕过后再更新航点。"
 	s.map_view_half = 78.0
 	s.spawn_position = Vector3(-280, 0, 52)
 	_move_body(s, "haven", Vector3(280, 0, -56))
@@ -99,8 +99,8 @@ static func level_2() -> SectorData:
 	s.display_name = "折光走廊"
 	s.participant_name = "折光走廊"
 	s.briefing = "正式任务 02：依次穿过四组错位航门，避免一次性指向远端。"
-	s.participant_briefing = "依次通过错位航门，将飞船送至河港近空。"
-	s.participant_hint = "每个开口方向都不同；转向前留出减速距离。"
+	s.participant_briefing = "依次穿过四道错位航门，将飞船送至河港近空。"
+	s.participant_hint = "各航门的开口方向不同。接近转弯前请提前减速。"
 	s.map_view_half = 74.0
 	s.spawn_position = Vector3(-350, 0, 48)
 	_move_body(s, "haven", Vector3(350, 0, -48))
@@ -144,12 +144,12 @@ static func level_3() -> SectorData:
 	var s := SectorCatalog.make_sector_01()
 	_meta(s, "level_3", 3, "磁暴坐标区", "导航异常归因", 200.0,
 		PackedStringArray(["waypoint_drift"]),
-		"两段校准井依次施压；每段进出口由行星挡住，迫使绕行进出。漂移落在第一井中段，安全门后进入第二井，出口再被寂井截断。")
+		"正常航行建立共同状态后，只武装一次领航点击偏移；异常后继续保留完整恢复航段。")
 	s.display_name = "磁暴坐标区"
 	s.participant_name = "寂井侧翼"
 	s.briefing = "正式任务 03：依次通过两段校准井。导航读数可能出现异常，请继续协作。"
-	s.participant_briefing = "依次通过两段校准井，将飞船送至陆脊近空。"
-	s.participant_hint = "进出口都被天体挡住；保持短句沟通，提早决定绕行侧。"
+	s.participant_briefing = "依次通过两段狭窄航道，将飞船送至陆脊近空。"
+	s.participant_hint = "航道出入口附近有天体遮挡。请简短沟通，并提前规划绕行方向。"
 	s.map_view_half = 74.0
 	s.spawn_position = Vector3(-350, 0, 58)
 	_move_body(s, "haven", Vector3(350, 0, -60))
@@ -190,22 +190,23 @@ static func level_3() -> SectorData:
 		# 外侧绕寂井
 		Vector3(210, 0, -70), Vector3(245, 0, -84), Vector3(295, 0, -78), Vector3(350, 0, -60),
 	])
-	s.disturbance_anchors = PackedVector3Array([Vector3(-90, 0, 42)])
-	s.safe_gate_points = PackedVector3Array([Vector3(5, 0, 8)])
-	s.relay_stations = PackedVector3Array([Vector3(5, 0, 8), Vector3(175, 0, -28)])
+	# 进入第一段校准井一段时间后仅触发一次；后方安全门留下完整恢复窗口。
+	s.disturbance_anchors = PackedVector3Array([Vector3(-110, 0, 47)])
+	s.safe_gate_points = PackedVector3Array([Vector3(-10, 0, 16)])
+	s.relay_stations = PackedVector3Array([Vector3(-10, 0, 16), Vector3(175, 0, -28)])
 	return s
 
 
 static func level_4() -> SectorData:
 	var s := SectorCatalog.make_sector_01()
 	_meta(s, "level_4", 4, "太阳风剪切", "协作恢复", 195.0,
-		PackedStringArray(["ship_shear", "recovery_window"]),
-		"先用短直线建立共同预期，再进入叠加大弧线的连续波浪航槽；上下危险脊在两端接入外圈，封死溜边路线，后半段逐渐加厚收窄。")
+		PackedStringArray(["ship_shear"]),
+		"先完成前半段连续弯道以建立共同预期，在波浪航槽几何中段触发唯一横向漂移；随后保留完整恢复航段。")
 	s.display_name = "太阳风剪切"
 	s.participant_name = "潮汐远航"
 	s.briefing = "正式任务 04：通过太阳风剪切带，并在异常后恢复稳定航线。"
-	s.participant_briefing = "穿越深空航区，将飞船送至潮汐站近空。"
-	s.participant_hint = "按弯道分段布置航点；连续转向时主动降速。"
+	s.participant_briefing = "沿弯曲航道前进，将飞船送至潮汐站近空。"
+	s.participant_hint = "请沿弯道分段设置航点，连续转向时及时减速。"
 	s.map_view_half = 72.0
 	s.spawn_position = Vector3(-340, 0, 12)
 	_move_body(s, "haven", Vector3(340, 0, -18))
@@ -232,13 +233,13 @@ static func level_4() -> SectorData:
 		var t := float(i) / 60.0
 		s.route_checkpoints.append((shear_upper.spline_point(t) + shear_lower.spline_point(t)) * 0.5)
 	s.route_checkpoints.append(Vector3(340, 0, -18))
-	var first_anchor := s.route_checkpoints[16]
-	var first_safe := s.route_checkpoints[20]
-	var second_anchor := s.route_checkpoints[38]
-	var second_safe := s.route_checkpoints[42]
-	s.disturbance_anchors = PackedVector3Array([first_anchor, second_anchor])
-	s.safe_gate_points = PackedVector3Array([first_safe, second_safe])
-	s.relay_stations = PackedVector3Array([first_safe, second_safe])
+	# route_checkpoints[31] 对应样条 t=0.50：已完整进入连续弯道，且不是入口漏斗。
+	# 后移 6 个采样段设置安全门，留下约 70—100 世界单位的自然恢复窗口。
+	var core_anchor := s.route_checkpoints[31]
+	var post_event_safe := s.route_checkpoints[36]
+	s.disturbance_anchors = PackedVector3Array([core_anchor])
+	s.safe_gate_points = PackedVector3Array([post_event_safe])
+	s.relay_stations = PackedVector3Array([post_event_safe,s.route_checkpoints[50]])
 	return s
 
 

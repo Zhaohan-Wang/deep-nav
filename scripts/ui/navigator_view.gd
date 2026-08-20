@@ -3,6 +3,8 @@ extends Control
 ## 领航员整页为 16:9 三维；星图是叠在画面上的小 16:9 显示器。
 
 const HID_KEY_E: int = 0x08
+const MissionStatusBarScript = preload("res://scripts/ui/mission_status_bar.gd")
+const ExperimentNoticeBannerScript = preload("res://scripts/ui/experiment_notice_banner.gd")
 
 var view_host: Control
 var _map: SectorMap
@@ -10,6 +12,9 @@ var _status: Label
 var _help: Label
 var _stages: DualStageColumn
 var _notice_serial: int = 0
+var _experiment_banner: Control
+var _waypoint_feedback_active: bool = false
+var _waypoint_feedback_prefix: String = ""
 
 
 func _ready() -> void:
@@ -87,6 +92,14 @@ func _build() -> void:
 		UiStyle.make_view_overlay(UiStyle.NAV_HAND_PATH)
 	)
 	add_child(UiStyle.make_role_badge(UiStyle.NAVIGATOR_BADGE_PATH))
+	add_child(MissionStatusBarScript.new())
+	_experiment_banner = ExperimentNoticeBannerScript.new()
+	add_child(_experiment_banner)
+
+
+func _process(_delta: float) -> void:
+	if _waypoint_feedback_active:
+		_refresh_waypoint_feedback()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -142,39 +155,49 @@ func _on_waypoint(world_pos: Vector3, enabled: bool) -> void:
 		_help.text = "航点 (%.0f, %.0f)  左键可改" % [world_pos.x, world_pos.z]
 		_help.add_theme_color_override("font_color", UiStyle.AMBER)
 	else:
+		_waypoint_feedback_active = false
 		_show_briefing()
 
 
 func _on_waypoint_result(accepted: bool,reason: String,_remaining_s: float) -> void:
 	if accepted:
-		if reason == "clamped_range":
-			_help.text="点击超出范围，航点已沿该方向放置在最远位置"
-			_help.add_theme_color_override("font_color",UiStyle.AMBER)
+		_waypoint_feedback_active = true
+		_waypoint_feedback_prefix = "航点已按该方向放在最远位置" if reason == "clamped_range" else "航点已设置"
+		_refresh_waypoint_feedback()
 		return
 	match reason:
+		"cooldown":
+			_waypoint_feedback_active = true
+			_waypoint_feedback_prefix = "当前航点保持不变"
+			_refresh_waypoint_feedback()
+			return
 		"boundary": _help.text="航点无效：目标位于边界排斥区"
-		"cooldown": _help.text="航点尚未就绪"
 		_: _help.text="航点无效"
+	_waypoint_feedback_active = false
 	_help.add_theme_color_override("font_color",UiStyle.DANGER)
 
 
+func _refresh_waypoint_feedback() -> void:
+	var state := Game.waypoint_cooldown_display_state()
+	if state == "cooling":
+		_help.text = "%s · 冷却 %.1f 秒" % [_waypoint_feedback_prefix, Game.waypoint_cooldown_remaining()]
+		_help.add_theme_color_override("font_color",UiStyle.AMBER)
+	elif state == "ready":
+		_help.text = "航点已就绪 · 可重新测算"
+		_help.add_theme_color_override("font_color",Color("5fe08a"))
+	else:
+		_waypoint_feedback_active = false
+
+
 func _on_relay_reached(_index: int, _position: Vector3, station_name: String) -> void:
+	_waypoint_feedback_active = false
 	_help.text = "已抵达%s · 解体后将从此处继续" % station_name
 	_help.add_theme_color_override("font_color", UiStyle.CYAN)
 
 
 func show_experiment_notice(message: String) -> void:
-	_notice_serial += 1
-	var serial := _notice_serial
-	_help.text = message
-	_help.add_theme_color_override("font_color",UiStyle.AMBER)
-	await get_tree().create_timer(4.2).timeout
-	if serial!=_notice_serial or not is_instance_valid(_help):
-		return
-	if Game.has_waypoint:
-		_on_waypoint(Game.waypoint,true)
-	else:
-		_show_briefing()
+	if _experiment_banner != null:
+		_experiment_banner.call("show_message",message,3.0)
 
 
 func _on_arrived() -> void:

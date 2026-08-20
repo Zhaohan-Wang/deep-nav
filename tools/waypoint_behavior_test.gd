@@ -37,8 +37,17 @@ func _run() -> void:
 	assert(game.call("waypoint_cooldown_display_state",sample_now)=="cooling","cooldown notice is not visible while locked")
 	var cooldown_end := sample_now+int(ceil(remaining_before*1000.0))
 	assert(game.call("waypoint_cooldown_display_state",cooldown_end+20)=="ready","ready notice did not turn green after cooldown")
-	assert(game.call("waypoint_cooldown_display_state",cooldown_end+2020)=="hidden","ready notice did not hide after two seconds")
+	assert(game.call("waypoint_cooldown_display_state",cooldown_end+10000)=="ready","ready state must remain stable until the next waypoint")
 	assert(not game.call("set_waypoint",ship+direction*10.0),"second waypoint bypassed cooldown")
 	assert(results[-1].reason=="cooldown" and results[-1].remaining>0.0,"cooldown rejection missing live remaining time")
-	print("WAYPOINT_BEHAVIOR_OK clamp_distance=%.1f angle_preserved=true cooldown_dynamic=true" % max_distance)
+	assert(game.get("waypoint") == waypoint,"cooldown rejection must keep the accepted waypoint unchanged")
+
+	var displays := root.get_node("Displays")
+	displays.call("set_primary_role",displays.Role.PILOT)
+	assert(not displays.call("pointer_device_matches_role",displays.PRIMARY_SEAT_POINTER_DEVICE,displays.Role.NAVIGATOR),
+		"pilot pointer must not be allowed to place a navigator waypoint")
+	assert(displays.call("pointer_device_matches_role",displays.SECONDARY_SEAT_POINTER_DEVICE,displays.Role.NAVIGATOR),
+		"navigator pointer must remain allowed after role assignment")
+	displays.call("set_primary_role",displays.Role.NAVIGATOR)
+	print("WAYPOINT_BEHAVIOR_OK clamp_distance=%.1f angle_preserved=true cooldown_dynamic=true ready_stable=true pilot_click_guarded=true" % max_distance)
 	quit(0)

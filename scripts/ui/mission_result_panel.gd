@@ -83,12 +83,13 @@ func show_summary(summary: Dictionary) -> void:
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(grid)
 	_add_stat(grid,"任务结果",str(summary.get("outcome","—")),AppStyle.CYAN if bool(summary.get("success",false)) else AppStyle.DANGER)
-	_add_stat(grid,"飞行用时","%.0f / %.0f 秒" % [summary.get("elapsed",0.0),summary.get("limit",0.0)],AppStyle.AMBER)
+	var time_text := "不计时" if not bool(summary.get("timed",true)) else "%.0f / %.0f 秒" % [summary.get("elapsed",0.0),summary.get("limit",0.0)]
+	_add_stat(grid,"飞行用时",time_text,AppStyle.AMBER)
 	_add_stat(grid,"复活次数","%d 次" % summary.get("revivals",0),AppStyle.TEXT)
 	_add_stat(grid,"受击次数","%d 次" % summary.get("hits",0),AppStyle.TEXT)
 	_add_stat(grid,"设置航点","%d 次" % summary.get("waypoints",0),AppStyle.TEXT)
 	_add_stat(grid,"剩余船体","%d%%" % int(round(float(summary.get("hull",0.0)))),AppStyle.AMBER)
-	var next := AppStyle.label("请回顾这次飞行，接下来将进入个人独立量表。",16,AppStyle.MUTED)
+	var next := AppStyle.label("请回顾这次飞行。接下来，两位玩家将分别回答几个简短问题。",16,AppStyle.MUTED)
 	next.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_content.add_child(next)
 

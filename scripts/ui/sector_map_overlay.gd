@@ -29,11 +29,17 @@ var _spin: float = 0.0
 ## 碎石带几何按关卡烘焙一次；每帧只做世界到屏幕的平移缩放。
 var _belt_cache_sector: String = ""
 var _belt_cache: Array[Dictionary] = []
+## 静态碎石层可在离屏视口中一次烘焙；正常动态覆盖层不再重复提交它。
+var static_belt_bake: bool = false
+var bake_world_rect: Rect2 = Rect2()
+var bake_scale_px: float = 1.0
 
 
 func _ready() -> void:
 	# 雷达环要自己转，不能只等飞船状态刷新。
-	set_process(true)
+	set_process(not static_belt_bake)
+	if static_belt_bake:
+		queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -45,17 +51,18 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	if static_belt_bake:
+		_draw_belts(null)
+		return
 	var map := get_parent() as SectorMap
 	if map == null:
 		return
-	_draw_belts(map)
 	_draw_body_measurements(map)
 	_draw_dest_beacon(map)
 	_draw_relay_stations(map)
 	_draw_waypoint_marker(map)
 	_draw_ship_radar(map)
-	# 顶部导航带最后画，星体进入顶端时不会盖住全程进度。
-	_draw_route_overview(map)
+	# 航程轨已移到底部公共 HUD，星图只保留领航信息。
 
 
 ## 每颗天体都画真实碰撞半径圈。像素光环可以越界，但物理大小必须一眼可验证。
@@ -214,7 +221,7 @@ func _draw_relay_stations(map: SectorMap) -> void:
 
 func _draw_belts(map: SectorMap) -> void:
 	_ensure_belt_cache()
-	var scale_px: float = map.pixels_per_unit()
+	var scale_px: float = bake_scale_px if static_belt_bake else map.pixels_per_unit()
 	for baked: Dictionary in _belt_cache:
 		var fill_color := baked["fill_color"] as Color
 		var left := baked["left"] as PackedVector2Array
@@ -328,6 +335,8 @@ func _xz(world: Vector3) -> Vector2:
 
 
 func _map_point(map: SectorMap, world_xz: Vector2) -> Vector2:
+	if static_belt_bake:
+		return (world_xz-bake_world_rect.position)*bake_scale_px
 	return map.world_to_map(Vector3(world_xz.x, 0.0, world_xz.y))
 
 

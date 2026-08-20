@@ -14,10 +14,15 @@ const OUT_PLANET_APPROACH := "res://artifacts/runtime/gameplay_planet_approach.p
 const OUT_BOUNDARY := "res://artifacts/runtime/gameplay_split_boundary.png"
 const OUT_LEVEL3_CORRIDOR := "res://artifacts/runtime/gameplay_level3_corridor.png"
 const OUT_LEVEL3_BLOCKER := "res://artifacts/runtime/gameplay_level3_blocker.png"
+const OUT_NOTICE_EXPLICIT := "res://artifacts/runtime/experiment_notice_explicit.png"
+const OUT_NOTICE_AMBIGUOUS := "res://artifacts/runtime/experiment_notice_ambiguous.png"
+const OUT_LEVEL4_NOTICE_EXPLICIT := "res://artifacts/runtime/experiment_notice_level4_explicit.png"
+const OUT_LEVEL4_NOTICE_AMBIGUOUS := "res://artifacts/runtime/experiment_notice_level4_ambiguous.png"
 const OUT_EXPLOSION := "res://artifacts/runtime/gameplay_explosion.png"
 const OUT_RESULT := "res://artifacts/runtime/mission_result.png"
 const OUT_RESULT_SUCCESS := "res://artifacts/runtime/mission_result_success.png"
 const OUT_SUMMARY := "res://artifacts/runtime/mission_summary.png"
+const OUT_ATTRIBUTION := "res://artifacts/runtime/mission_attribution.png"
 const OUT_SURVEY_1 := "res://artifacts/runtime/survey_page_1.png"
 const OUT_SURVEY_2 := "res://artifacts/runtime/survey_page_2.png"
 const OUT_SURVEY_3 := "res://artifacts/runtime/survey_page_3.png"
@@ -197,6 +202,16 @@ func _capture() -> void:
 	for i: int in range(12): await process_frame
 	await create_timer(0.45).timeout
 	if not _save_capture(OUT_LEVEL3_BLOCKER): quit(1); return
+	var notice_nav := level3_scene.get("_navigator_view") as Control
+	var notice_pilot := level3_scene.get("_pilot_view") as Control
+	notice_nav.call("show_experiment_notice","检测到磁暴干扰。航点位置已发生偏移。")
+	notice_pilot.call("show_experiment_notice","检测到磁暴干扰。航点位置已发生偏移。")
+	for i: int in range(4): await process_frame
+	if not _save_role_pair(level3_scene,notice_nav,notice_pilot,OUT_NOTICE_EXPLICIT): quit(1); return
+	notice_nav.call("show_experiment_notice","检测到航点位置偏移，原因未知。")
+	notice_pilot.call("show_experiment_notice","检测到航点位置偏移，原因未知。")
+	for i: int in range(4): await process_frame
+	if not _save_role_pair(level3_scene,notice_nav,notice_pilot,OUT_NOTICE_AMBIGUOUS): quit(1); return
 	game.call("explode_ship")
 	await create_timer(0.05,true,false,true).timeout
 	if not _save_capture(OUT_EXPLOSION): quit(1); return
@@ -224,6 +239,40 @@ func _capture() -> void:
 	for i: int in range(3): await process_frame
 	if not _save_capture(OUT_SUMMARY): quit(1); return
 	for result: Control in result_panels: result.free()
+	for i: int in range(4): await process_frame
+	nav_view.call("show_experiment_notice","检测到航点位置偏移，原因未知。")
+	pilot_view.call("show_experiment_notice","检测到航点位置偏移，原因未知。")
+	for i: int in range(3): await process_frame
+	var participant_views := level3_scene.call("_capture_participant_views",false) as Dictionary
+	var attribution_record := {
+		"event_id":"runtime-level3-review","event_type":"mission_responsibility",
+		"mission_id":"level_3","mission_label":"正式任务 03","elapsed":146.8,
+		"outcome":"完成","success":true,"attempt_number":1,
+		"target_event_type":"waypoint_drift","target_event_exposed":true,"target_event_pulse_count":1,
+		"capture_kind":"target_peak","views":participant_views,
+		"flight_trail":PackedVector2Array([
+			Vector2(5,8),Vector2(42,2),Vector2(75,5),Vector2(108,-4),Vector2(140,-18),
+			Vector2(175,-28),Vector2(210,-70),Vector2(260,-82),Vector2(310,-72),Vector2(350,-60),
+		]),
+		"failed_flight_trails":[
+			PackedVector2Array([Vector2(-350,58),Vector2(-300,60),Vector2(-250,72),Vector2(-205,67),Vector2(-165,60)]),
+			PackedVector2Array([Vector2(5,8),Vector2(48,2),Vector2(88,-2),Vector2(115,-9)]),
+		],
+		"collision_points":PackedVector2Array([Vector2(-165,60),Vector2(115,-9)]),
+		"target_event_position":Vector2(160,-24),
+		"target_event_positions":PackedVector2Array([Vector2(-110,47)]),
+		"flight_start":Vector2(-350,58),"flight_goal":Vector2(350,-60),
+		"flight_world_bounds":level3_scene.call("_mission_flight_bounds"),
+	}
+	var attribution_panels: Array[Control] = []
+	for entry: Dictionary in [{"role":"navigator","parent":nav_view},{"role":"pilot","parent":pilot_view}]:
+		var attribution: Control = load("res://scripts/ui/mission_attribution_panel.gd").new()
+		(entry.parent as Control).add_child(attribution)
+		attribution.setup(entry.role,entry.role,attribution_record)
+		attribution_panels.append(attribution)
+	for i: int in range(5): await process_frame
+	if not _save_capture(OUT_ATTRIBUTION): quit(1); return
+	for attribution: Control in attribution_panels: attribution.free()
 	var surveys: Array[Control] = []
 	for entry: Dictionary in [{"role":"navigator","parent":nav_view},{"role":"pilot","parent":pilot_view}]:
 		var survey: Control = load("res://scripts/ui/survey_panel.gd").new()
@@ -238,7 +287,36 @@ func _capture() -> void:
 	for survey: Control in surveys: survey.call("_show_page",2)
 	for i: int in range(3): await process_frame
 	if not _save_capture(OUT_SURVEY_3): quit(1); return
-	print("RUNTIME_CAPTURE_OK first_run=%s title=%s select=%s start=%s cooldown=%s arrows=%s hull=%s mid=%s approach=%s boundary=%s level3=%s blocker=%s explosion=%s result=%s result_success=%s summary=%s survey1=%s survey2=%s survey3=%s" % [OUT_FIRST_RUN,OUT_TITLE,OUT_LEVEL_SELECT,OUT_START,OUT_WAYPOINT_COOLDOWN,OUT_CONTROL_ARROWS,OUT_HULL_DAMAGE,OUT_MID,OUT_PLANET_APPROACH,OUT_BOUNDARY,OUT_LEVEL3_CORRIDOR,OUT_LEVEL3_BLOCKER,OUT_EXPLOSION,OUT_RESULT,OUT_RESULT_SUCCESS,OUT_SUMMARY,OUT_SURVEY_1,OUT_SURVEY_2,OUT_SURVEY_3])
+	for survey: Control in surveys: survey.free()
+	level3_scene.queue_free()
+	for i: int in range(4): await process_frame
+	game.call("select_mission","level_4")
+	var level4_scene := packed.instantiate()
+	root.add_child(level4_scene)
+	for i: int in range(12): await process_frame
+	var level4_nav := level4_scene.get("_navigator_view") as Control
+	var level4_pilot := level4_scene.get("_pilot_view") as Control
+	var level4_ship := level4_scene.get_node_or_null("SpaceWorld/Ship") as Node3D
+	var level4_sector := game.get("current_sector") as SectorData
+	var actual_trigger := level4_sector.disturbance_anchors[0]
+	var trigger_index := level4_sector.route_checkpoints.find(actual_trigger)
+	var next_route := level4_sector.route_checkpoints[mini(trigger_index+1,level4_sector.route_checkpoints.size()-1)]
+	level4_ship.global_position = actual_trigger
+	level4_ship.look_at(next_route,Vector3.UP)
+	level4_ship.set("linear_velocity",Vector3.ZERO)
+	level4_ship.set("angular_velocity",Vector3.ZERO)
+	game.set("ship_position",actual_trigger)
+	game.set("ship_heading",level4_ship.rotation.y)
+	for i: int in range(8): await process_frame
+	level4_nav.call("show_experiment_notice","检测到太阳风扰动。飞船已出现横向偏移。")
+	level4_pilot.call("show_experiment_notice","检测到太阳风扰动。飞船已出现横向偏移。")
+	for i: int in range(4): await process_frame
+	if not _save_role_pair(level4_scene,level4_nav,level4_pilot,OUT_LEVEL4_NOTICE_EXPLICIT): quit(1); return
+	level4_nav.call("show_experiment_notice","检测到飞船横向偏移，原因未知。")
+	level4_pilot.call("show_experiment_notice","检测到飞船横向偏移，原因未知。")
+	for i: int in range(4): await process_frame
+	if not _save_role_pair(level4_scene,level4_nav,level4_pilot,OUT_LEVEL4_NOTICE_AMBIGUOUS): quit(1); return
+	print("RUNTIME_CAPTURE_OK level3_explicit=%s level3_ambiguous=%s level4_explicit=%s level4_ambiguous=%s" % [OUT_NOTICE_EXPLICIT,OUT_NOTICE_AMBIGUOUS,OUT_LEVEL4_NOTICE_EXPLICIT,OUT_LEVEL4_NOTICE_AMBIGUOUS])
 	quit(0)
 
 
@@ -249,3 +327,17 @@ func _save_capture(path: String) -> bool:
 		push_error("RUNTIME_CAPTURE_FAILED %s error=%s" % [path,error])
 		return false
 	return true
+
+
+func _save_role_pair(scene: Node,nav_view: Control,pilot_view: Control,path: String) -> bool:
+	var nav := scene.call("_capture_page_region",nav_view,"navigator",false) as Image
+	var pilot := scene.call("_capture_page_region",pilot_view,"pilot",false) as Image
+	if nav == null or pilot == null or nav.is_empty() or pilot.is_empty():
+		push_error("RUNTIME_CAPTURE_FAILED role pair empty: %s" % path)
+		return false
+	nav.resize(960,540,Image.INTERPOLATE_LANCZOS)
+	pilot.resize(960,540,Image.INTERPOLATE_LANCZOS)
+	var pair := Image.create(1920,540,false,Image.FORMAT_RGB8)
+	pair.blit_rect(nav,Rect2i(Vector2i.ZERO,nav.get_size()),Vector2i.ZERO)
+	pair.blit_rect(pilot,Rect2i(Vector2i.ZERO,pilot.get_size()),Vector2i(960,0))
+	return pair.save_png(path) == OK

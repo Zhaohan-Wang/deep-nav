@@ -2,8 +2,11 @@ extends Node
 ## 左右分屏。3D 世界挂在主场景，两个 SubViewport 共用同一套世界与各自相机。
 
 const SurveyPanelScript = preload("res://scripts/ui/survey_panel.gd")
+const ExperimentReviewPanelScript = preload("res://scripts/ui/experiment_review_panel.gd")
+const MissionAttributionPanelScript = preload("res://scripts/ui/mission_attribution_panel.gd")
 const MissionResultPanelScript = preload("res://scripts/ui/mission_result_panel.gd")
 const PauseMenuScript = preload("res://scripts/ui/pause_menu.gd")
+const TutorialOverlayScript = preload("res://scripts/ui/tutorial_overlay.gd")
 
 const VIEW_SIZE := Vector2i(640, 360)
 const VIEW_FOV: float = 64.0
@@ -43,6 +46,13 @@ const SEVERE_HEADING_EXIT_RAD := deg_to_rad(40.0)
 const SEVERE_HEADING_MIN_S := 2.0
 const SEVERE_HEADING_MIN_SPEED := 3.0
 const SEVERE_HEADING_MIN_WAYPOINT_DISTANCE := 8.0
+const FLIGHT_TRAIL_SAMPLE_S := 0.12
+const FLIGHT_TRAIL_POINT_CAP := 1800
+## 第三关的航点异常不使用固定角度。每次触发独立抽取方向和幅度；
+## 24° 已明显高于旧版 13°，36° 则保留足够强的异常感但不直接反转航向。
+const WAYPOINT_DRIFT_MIN_DEG := 24.0
+const WAYPOINT_DRIFT_MAX_DEG := 36.0
+const WAYPOINT_DRIFT_STEP_DEG := 0.5
 
 var _world: Node3D
 var _ship: Ship
@@ -90,15 +100,38 @@ var _ship_shear_events: int = 0
 var _mission_finishing: bool = false
 var _mission_ended: bool = false
 var _mission_outcome: String = ""
+var _mission_summary: Dictionary = {}
 var _survey_answers: Dictionary = {}
+var _mission_attribution_answers: Dictionary = {}
+var _review_transitioning := false
 var _result_panels: Array[Control] = []
 var _pause_menus: Array[Control] = []
+var _tutorial_overlays: Array[Control] = []
 var _last_pause_toggle_ms: int = -1000
 var _pause_scene_transitioning: bool = false
+var _target_event_record: Dictionary = {}
+var _target_event_written := false
+var _target_event_elapsed_s := 0.0
+var _target_event_gate_index := -1
+var _active_waypoint_record: Dictionary = {}
+var _waypoint_elapsed_s := 0.0
+var _alignment_hold_s := 0.0
+var _override_hold_s := 0.0
+var _last_waypoint_heading_error := 0.0
+var _flight_trail := PackedVector2Array()
+var _failed_flight_trails: Array[PackedVector2Array] = []
+var _collision_points := PackedVector2Array()
+var _flight_trail_timer := 0.0
+var _target_event_peak_position: Variant = null
+var _target_event_positions := PackedVector2Array()
+var _waypoint_drift_rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_waypoint_drift_rng.randomize()
+	var attempt_number := Game.note_mission_attempt()
+	ExperimentLog.begin_mission_attempt(attempt_number)
 	_bind_inputs()
 	_build_ui()
 	_build_world_and_cameras()
@@ -118,11 +151,18 @@ func _ready() -> void:
 	RawMice.key_changed.connect(_on_raw_keyboard_key)
 	# 双屏贯穿整个应用；单显示器环境也保留两个并排窗口用于开发预览。
 	Game.set_view_mode(Game.ViewMode.DUAL_WINDOW)
+	Game.mission_elapsed_s = 0.0
+	Game.mission_time_limit_s = Game.current_sector.time_limit_s if Game.current_sector != null else 0.0
+	Game.mission_timer_active = _mission_timer_enabled()
+	_flight_trail.append(_world_to_trail(Game.ship_position))
 	if Game.current_sector != null:
 		GameAudio.start_mission_audio(Game.current_sector.id)
 
 
 func _exit_tree() -> void:
+	# 双屏席位会临时挂到常驻 Displays 节点；场景退出前必须先收回来，
+	# 否则重复进关或串行性能测试会把上一关的整套 UI 留在副窗口继续渲染。
+	_close_extra_window()
 	GameAudio.stop_ship_motion(true)
 	GameAudio.stop_mission_audio(true)
 	if get_tree() != null and get_tree().paused:
@@ -161,8 +201,9 @@ func _process(delta: float) -> void:
 	_pilot_camera.rotation_degrees.z = shake.x * 4.5
 	_apply_ship_focus(_nav_camera, _nav_fog_mat, _nav_camera.global_position.distance_to(_ship.global_position) + NAV_FOCUS_PADDING)
 	_apply_ship_focus(_pilot_camera, _pilot_fog_mat, PILOT_FOCUS_AHEAD)
-	if not _mission_ended and not _mission_finishing and Game.current_sector != null:
+	if not _mission_ended and not _mission_finishing and _mission_timer_enabled():
 		_mission_elapsed += delta
+		Game.mission_elapsed_s = _mission_elapsed
 		if _mission_elapsed >= Game.current_sector.time_limit_s:
 			_mission_elapsed = Game.current_sector.time_limit_s
 			_begin_mission_end("超时未完成",false)
@@ -172,7 +213,82 @@ func _physics_process(delta: float) -> void:
 	if get_tree().paused:
 		return
 	_track_severe_heading_deviation(delta)
+	_sample_flight_trail(delta)
+	var active_delta := delta/maxf(Engine.time_scale,0.05)
+	_update_waypoint_response(active_delta)
+	_update_target_event_window(active_delta)
 	ExperimentLog.sample_frame()
+
+
+func _update_waypoint_response(_delta: float) -> void:
+	# 详细航点响应由逐帧原始数据保留；没有活动追踪窗口时无需额外汇总。
+	if _active_waypoint_record.is_empty():
+		return
+
+
+func _update_target_event_window(_delta: float) -> void:
+	if _target_event_record.is_empty() or _target_event_written:
+		return
+	_target_event_elapsed_s += _delta
+	_target_event_record["window_observed_ms"] = _target_event_elapsed_s*1000.0
+	var heading_error := 0.0
+	if Game.has_waypoint:
+		var to_waypoint := Game.waypoint-Game.ship_position
+		to_waypoint.y = 0.0
+		if to_waypoint.length_squared()>0.0001:
+			heading_error = rad_to_deg(absf(wrapf(atan2(-to_waypoint.x,-to_waypoint.z)-Game.ship_heading,-PI,PI)))
+	_target_event_record["max_heading_error_deg_15s"] = maxf(float(_target_event_record.get("max_heading_error_deg_15s",0.0)),heading_error)
+	if not _target_event_record.has("pilot_response_latency_ms") and (
+		absf(Displays.pilot_turn_axis())>0.12 or absf(Displays.pilot_thrust_axis())>0.12
+	):
+		_target_event_record["pilot_response_latency_ms"] = _target_event_elapsed_s*1000.0
+	if not bool(_target_event_record.get("recovered_within_window",false)) and heading_error <= 20.0 and Game.ship_speed <= 18.0:
+		_target_event_record["recovered_within_window"] = true
+		_target_event_record["recovery_time_ms"] = _target_event_elapsed_s*1000.0
+	_target_event_record["damage_events_15s"] = _mission_hits-int(_target_event_record.get("hits_at_onset",_mission_hits))
+	_target_event_record["hull_loss_15s"] = maxf(0.0,float(_target_event_record.get("hull_at_onset",Game.hull))-Game.hull)
+	if _target_event_elapsed_s >= 15.0:
+		_finalize_target_event("window_complete")
+
+
+func _finalize_target_event(outcome: String) -> void:
+	if _target_event_record.is_empty() or _target_event_written: return
+	_target_event_record["outcome"] = outcome
+	_target_event_record["disintegrated_15s"] = not Game.ship_alive
+	var details := _target_event_record.get("details",{}) as Dictionary
+	if _target_event_record.has("pilot_response_latency_ms"):
+		details["pilot_response_latency_ms"] = _target_event_record.pilot_response_latency_ms
+	if _target_event_record.has("recovery_time_ms"):
+		details["recovery_time_ms"] = _target_event_record.recovery_time_ms
+	_target_event_record["details"] = details
+	ExperimentLog.record_target_event(_target_event_record)
+	_target_event_written = true
+	ExperimentLog.clear_active_target_event()
+	ExperimentLog.advance_segment()
+
+
+func _sample_flight_trail(delta: float) -> void:
+	if (_mission_ended or _mission_finishing or _restarting or not Game.ship_alive
+			or _flight_trail.size() >= FLIGHT_TRAIL_POINT_CAP):
+		return
+	_flight_trail_timer -= delta
+	if _flight_trail_timer > 0.0:
+		return
+	_flight_trail_timer = FLIGHT_TRAIL_SAMPLE_S
+	var point := _world_to_trail(Game.ship_position)
+	if _flight_trail.is_empty() or _flight_trail[_flight_trail.size()-1].distance_to(point) > 0.04:
+		_flight_trail.append(point)
+
+
+func _archive_failed_flight_trail() -> void:
+	if _flight_trail.size() >= 2:
+		_failed_flight_trails.append(_flight_trail.duplicate())
+	_flight_trail = PackedVector2Array()
+	_flight_trail_timer = 0.0
+
+
+func _world_to_trail(position: Vector3) -> Vector2:
+	return Vector2(position.x,position.z)
 
 
 func _track_severe_heading_deviation(delta: float) -> void:
@@ -380,6 +496,7 @@ func _build_ui() -> void:
 	_death_overlays.append(_attach_screen_white(_navigator_view))
 	_death_overlays.append(_attach_screen_white(_pilot_view))
 	_build_pause_menus()
+	_build_tutorial_overlays()
 
 
 func _build_pause_menus() -> void:
@@ -395,6 +512,34 @@ func _build_pause_menus() -> void:
 		menu.connect("level_select_requested", _return_to_level_select)
 		menu.connect("title_requested", _return_to_title)
 		_pause_menus.append(menu)
+
+
+func _build_tutorial_overlays() -> void:
+	if not _is_tutorial_mission():
+		return
+	for entry: Dictionary in [
+		{"role": "navigator", "page": _navigator_view},
+		{"role": "pilot", "page": _pilot_view},
+	]:
+		var overlay := TutorialOverlayScript.new() as Control
+		(entry.page as Control).add_child(overlay)
+		overlay.call("setup", str(entry.role))
+		overlay.connect("finished", _on_tutorial_finished)
+		_tutorial_overlays.append(overlay)
+
+
+func _on_tutorial_finished(role: String) -> void:
+	ExperimentLog.log_event("tutorial_completed", role, {
+		"mission": Game.selected_mission_id,
+	})
+
+
+func _is_tutorial_mission() -> bool:
+	return Game.current_sector != null and Game.current_sector.id == "practice"
+
+
+func _mission_timer_enabled() -> bool:
+	return Game.current_sector != null and not _is_tutorial_mission()
 
 
 func _build_world_and_cameras() -> void:
@@ -701,6 +846,7 @@ func _apply_death_white(value: float) -> void:
 
 func _on_ship_hit(remaining: float) -> void:
 	_mission_hits += 1
+	_collision_points.append(_world_to_trail(Game.ship_position))
 	GameAudio.play_ship_impact(remaining / Game.MAX_HULL)
 	ExperimentLog.log_event("ship_hit","pilot",{
 		"hit_index":_mission_hits,"remaining_hull":remaining,
@@ -732,9 +878,17 @@ func _on_ship_exploded(world_pos: Vector3) -> void:
 	if _restarting:
 		return
 	_mission_deaths += 1
+	_archive_failed_flight_trail()
 	ExperimentLog.log_event("ship_exploded","pilot",{
 		"revival":_mission_deaths,"x":world_pos.x,"z":world_pos.z,"elapsed":_mission_elapsed,
 	})
+	var target_exposed := _waypoint_drift_events > 0 or _ship_shear_events > 0
+	if Game.selected_mission_id in ["level_3","level_4"] and target_exposed:
+		# 第一次有效暴露后的解体就是异常后果；自然结束本航段并进入事件回顾。
+		_prime_explosion_visual(world_pos)
+		_death_time = 0.0
+		_begin_mission_end.call_deferred("异常后飞船解体",false)
+		return
 	_restarting = true
 	_prime_explosion_visual(world_pos)
 	# 顿帧强化冲击 → 白屏闪两下后拉到纯白 → 纯白遮挡下传回出生点 → 淡出。
@@ -746,10 +900,20 @@ func _on_ship_exploded(world_pos: Vector3) -> void:
 	if _mission_finishing:
 		_restarting = false
 		return
+	if Game.selected_mission_id in ["level_3","level_4"] and get_tree().current_scene != null:
+		# 核心异常尚未发生：本次没有可评价事件，重新开始该关且保留下一次触发资格。
+		ExperimentLog.log_event("pre_target_failure_restart","system",{"elapsed":_mission_elapsed})
+		_restarting = false
+		Game.reset_run()
+		get_tree().reload_current_scene()
+		return
 	var checkpoint := Game.last_respawn_point()
 	Game.respawn_ship_at(checkpoint.position,checkpoint.heading)
+	ExperimentLog.begin_new_life()
+	ExperimentLog.advance_segment()
 	if _ship != null:
 		_ship.snap_to_state()
+	_flight_trail.append(_world_to_trail(checkpoint.position))
 	ExperimentLog.log_event("ship_respawn","system",{
 		"revival":_mission_deaths,"relay":checkpoint.index,"relay_name":checkpoint.name,
 		"x":checkpoint.position.x,"z":checkpoint.position.z,"elapsed":_mission_elapsed
@@ -838,6 +1002,8 @@ func _on_display_roles_swapped(_primary_role: int, _secondary_role: int) -> void
 
 
 func _switch_pointer_role() -> void:
+	if Game.experiment_mode:
+		return
 	Displays.swap_roles()
 
 
@@ -875,7 +1041,8 @@ func _on_waypoint_sfx(_pos: Vector3, enabled: bool) -> void:
 func _on_waypoint_request_result(accepted: bool, reason: String, remaining_s: float) -> void:
 	if accepted:
 		_mission_waypoints += 1
-	if not accepted:
+	# 冷却中重复点击只是无效输入，不作为错误播放失败音；边界等真正无效请求才提示。
+	if not accepted and reason != "cooldown":
 		GameAudio.play_waypoint_denied()
 	ExperimentLog.log_event("waypoint_request","navigator",{
 		"request_sequence":Game.waypoint_request_sequence,
@@ -886,6 +1053,29 @@ func _on_waypoint_request_result(accepted: bool, reason: String, remaining_s: fl
 		"accepted":accepted,"reason":reason,"remaining_s":remaining_s,
 		"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z,
 	})
+	var to_requested := Game.last_waypoint_requested-Game.ship_position
+	to_requested.y = 0.0
+	var requested_heading := atan2(-to_requested.x,-to_requested.z) if to_requested.length_squared()>0.0001 else Game.ship_heading
+	var drift_angle := 0.0
+	if accepted:
+		var before := Game.last_waypoint_requested-Game.ship_position
+		var after := Game.last_waypoint_applied-Game.ship_position
+		if before.length_squared()>0.0001 and after.length_squared()>0.0001:
+			drift_angle = rad_to_deg(atan2(before.normalized().cross(after.normalized()).y,before.normalized().dot(after.normalized())))
+	ExperimentLog.record_waypoint({
+		"waypoint_id":"%s-waypoint-%04d" % [ExperimentLog.current_attempt_id(),Game.waypoint_request_sequence],
+		"request_sequence":Game.waypoint_request_sequence,"request_session_elapsed_ms":ExperimentLog.session_elapsed_ms(),
+		"accepted":accepted,"reason":reason,"remaining_cooldown_ms":remaining_s*1000.0,
+		"requested_x":Game.last_waypoint_requested.x,"requested_z":Game.last_waypoint_requested.z,
+		"applied_x":Game.last_waypoint_applied.x if accepted else null,"applied_z":Game.last_waypoint_applied.z if accepted else null,
+		"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z,
+		"initial_heading_error_deg":rad_to_deg(absf(wrapf(requested_heading-Game.ship_heading,-PI,PI))),
+		"waypoint_distance":Game.ship_position.distance_to(Game.last_waypoint_applied) if accepted else Game.ship_position.distance_to(Game.last_waypoint_requested),
+		"drifted":accepted and absf(drift_angle)>0.01,"drift_angle_deg":drift_angle,
+	})
+	if accepted and not _target_event_record.is_empty() and not _target_event_written and not _target_event_record.has("navigator_repair_latency_ms"):
+		_target_event_record["navigator_repair_latency_ms"] = _target_event_elapsed_s*1000.0
+		_target_event_record["repair_waypoint_distance"] = Game.ship_position.distance_to(Game.last_waypoint_applied)
 
 
 func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> void:
@@ -895,8 +1085,25 @@ func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> vo
 	})
 	match slot:
 		"waypoint_drift":
-			Game.trigger_waypoint_drift(13.0)
+			if _waypoint_drift_events > 0 or not (Game.get("_pending_waypoint_drifts") as Array).is_empty():
+				ExperimentLog.log_event("duplicate_target_event_suppressed","system",{"slot":slot,"gate_index":index})
+				return
+			var drift_angle := _draw_waypoint_drift_angle()
+			ExperimentLog.log_event("waypoint_drift_drawn","system",{
+				"gate_index":index,
+				"attempt_number":Game.current_mission_attempt_number(),
+				"signed_angle_degrees":drift_angle,
+				"magnitude_degrees":absf(drift_angle),
+				"direction":"counterclockwise" if drift_angle > 0.0 else "clockwise",
+				"minimum_degrees":WAYPOINT_DRIFT_MIN_DEG,
+				"maximum_degrees":WAYPOINT_DRIFT_MAX_DEG,
+			})
+			# 只武装下一次领航点击；原始点击位置从不显示，直接生成偏移后的最终航点。
+			Game.arm_waypoint_drift(drift_angle,"level_3_disturbance_gate")
 		"ship_shear":
+			if _ship_shear_events > 0:
+				ExperimentLog.log_event("duplicate_target_event_suppressed","system",{"slot":slot,"gate_index":index})
+				return
 			if _ship != null:
 				var impulse := _ship.apply_experiment_shear(4.8)
 				Game.disturbance_effect_applied.emit("ship_shear",{
@@ -906,33 +1113,287 @@ func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> vo
 			Game.disturbance_effect_applied.emit("recovery_window",{})
 
 
+func _draw_waypoint_drift_angle() -> float:
+	# 幅度和方向分开抽取，确保不会因一个带符号区间的实现细节偏向某一侧。
+	var magnitude := snappedf(
+		_waypoint_drift_rng.randf_range(WAYPOINT_DRIFT_MIN_DEG,WAYPOINT_DRIFT_MAX_DEG),
+		WAYPOINT_DRIFT_STEP_DEG
+	)
+	var direction := -1.0 if _waypoint_drift_rng.randi_range(0,1) == 0 else 1.0
+	return magnitude * direction
+
+
 func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
 	var details := payload.duplicate()
 	details["condition"] = Game.attribution_condition
-	ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+	var pulse_index := (_waypoint_drift_events+1) if effect=="waypoint_drift" else ((_ship_shear_events+1) if effect=="ship_shear" else 0)
+	var event_id := "%s_%s_%02d" % [ExperimentLog.current_attempt_id(),effect,pulse_index]
+	if effect in ["waypoint_drift","ship_shear"]:
+		ExperimentLog.advance_segment()
+		ExperimentLog.set_active_target_event(event_id,effect)
+	# 提示先进入两个参与者的真实画面，下一帧开始采集的事件截图必须保留该操纵信息。
+	var message := _causal_explanation_message(effect,Game.attribution_condition)
+	if not message.is_empty():
+		GameAudio.play_system_alert()
+		if _navigator_view != null: _navigator_view.show_experiment_notice(message)
+		if _pilot_view != null: _pilot_view.show_experiment_notice(message)
+		ExperimentLog.log_event("explanation_message_displayed","system",{
+			"event_id":event_id,"fault_type":effect,
+			"message_id":"%s_%s_v1" % [effect,Game.attribution_condition],"message_version":"1",
+			"message_displayed":true,"displayed_to_participants":[Game.participant_id_for_role("navigator"),Game.participant_id_for_role("pilot")],
+		})
 	if effect == "waypoint_drift":
 		_waypoint_drift_events += 1
+		_append_target_event_position(Game.ship_position)
+		details["pulse_index"] = _waypoint_drift_events
+		details["event_id"] = event_id
+		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+		# 航点偏移在新航点出现的瞬间达到最大值；截图同时保留已显示的系统提示。
+		var review_payload := payload.duplicate()
+		review_payload["pulse_index"] = _waypoint_drift_events
+		review_payload["event_id"] = event_id
+		await _capture_target_event_review(effect,review_payload)
 	elif effect == "ship_shear":
 		_ship_shear_events += 1
-	var explicit := Game.attribution_condition=="explicit"
-	var message := ""
+		_append_target_event_position(Game.ship_position)
+		details["pulse_index"] = _ship_shear_events
+		details["event_id"] = event_id
+		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+		# 横向漂移要观察一小段时间，按实际横向位移挑选峰值帧；原因提示无需等截图。
+		var review_payload := payload.duplicate()
+		review_payload["pulse_index"] = _ship_shear_events
+		review_payload["event_id"] = event_id
+		_capture_target_event_review(effect,review_payload)
+	else:
+		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+	if effect in ["waypoint_drift","ship_shear"]:
+		_target_event_elapsed_s = 0.0
+		_target_event_written = false
+		_target_event_record = {
+			"event_id":event_id,"event_type":effect,"fault_type":effect,
+			"event_time_session_ms":ExperimentLog.session_elapsed_ms(),"event_time_mission_ms":_mission_elapsed*1000.0,
+			"parameter_name":"angle_degrees" if effect=="waypoint_drift" else "strength",
+			"parameter_value":payload.get("angle_degrees",payload.get("strength",null)),
+			"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z,"speed_at_event":Game.ship_speed,
+			"waypoint_distance_at_event":Game.ship_position.distance_to(Game.waypoint) if Game.has_waypoint else null,
+			"obstacle_distance_at_event":_nearest_body_surface_gap(),"details":details,
+			"hits_at_onset":_mission_hits,"hull_at_onset":Game.hull,
+		}
+
+
+func _append_target_event_position(world_position: Vector3) -> void:
+	var point := _world_to_trail(world_position)
+	# 每一个实际生效的异常都保留；即使两个脉冲位置接近，也不能因视觉去重丢掉记录。
+	_target_event_positions.append(point)
+
+
+func _causal_explanation_message(effect: String,condition: String) -> String:
+	var explicit := condition == "explicit"
 	match effect:
-		"waypoint_drift","waypoint_drift_armed":
-			message = "系统说明：磁暴造成航点方向偏移 13°" if explicit else "系统提示：航点方向出现 13°偏差"
+		"waypoint_drift":
+			return (
+				"检测到磁暴干扰。航点位置已发生偏移。"
+				if explicit
+				else "检测到航点位置偏移，原因未知。"
+			)
 		"ship_shear":
-			message = "系统说明：太阳风剪切造成飞船横向偏移" if explicit else "系统提示：飞船出现横向偏移"
+			return (
+				"检测到太阳风扰动。飞船已出现横向偏移。"
+				if explicit
+				else "检测到飞船横向偏移，原因未知。"
+			)
 		"recovery_window":
-			message = "系统说明：太阳风影响减弱，进入恢复窗口" if explicit else "系统提示：航行状态进入恢复窗口"
-	if message.is_empty():
+			# 恢复提示不再强化原因；两个条件只在目标异常的因果说明上不同。
+			return "飞船状态已恢复稳定。"
+	return ""
+
+
+func _capture_target_event_review(event_type: String,payload: Dictionary = {}) -> void:
+	# 只保存参与者实际可见画面的任务相关区域，不叠加后台向量、真实坐标或研究者信息。
+	var event_origin := Game.ship_position
+	var travel_direction := Vector3(Game.ship_velocity.x,0.0,Game.ship_velocity.z)
+	if travel_direction.length_squared() < 0.01 and _ship != null:
+		travel_direction = _ship.get_forward()
+	travel_direction = travel_direction.normalized()
+	var lateral := Vector3(-travel_direction.z,0.0,travel_direction.x)
+	var best_metric := -1.0
+	var best_views: Dictionary = {}
+	var best_time_s := _mission_elapsed
+	var sample_count := 1 if event_type == "waypoint_drift" else 16
+	for sample_index: int in range(sample_count):
+		if sample_index == 0:
+			await get_tree().process_frame
+		else:
+			await get_tree().create_timer(0.10).timeout
+		if not is_instance_valid(_navigator_view) or not is_instance_valid(_pilot_view):
+			return
+		var metric := 0.0
+		if event_type == "waypoint_drift":
+			# 第三关按程序实际施加的角度记录峰值，不用玩家随后飞行产生的位移代替扰动强度。
+			metric = absf(float(payload.get("angle_degrees",0.0)))
+		else:
+			metric = absf((Game.ship_position-event_origin).dot(lateral))
+		if metric >= best_metric:
+			best_metric = metric
+			best_time_s = _mission_elapsed
+			_target_event_peak_position = _world_to_trail(Game.ship_position)
+			best_views = _capture_participant_views(true)
+		if event_type == "ship_shear" and (not Game.ship_alive or Game.mission_complete):
+			break
+	if best_views.is_empty():
 		return
-	GameAudio.play_system_alert()
-	if _navigator_view != null:
-		_navigator_view.show_experiment_notice(message)
-	if _pilot_view != null:
-		_pilot_view.show_experiment_notice(message)
+	var attempt_number := Game.current_mission_attempt_number()
+	var previous_record := Game.event_review(event_type)
+	# 同一异常段只把程序脉冲中施加强度最大的一帧送入问卷；重试时第一帧总会覆盖旧尝试。
+	if (int(previous_record.get("attempt_number",-1)) == attempt_number
+			and float(previous_record.get("peak_metric",-1.0)) > best_metric):
+		ExperimentLog.log_event("event_review_peak_retained","system",{
+			"event_type":event_type,
+			"pulse_index":int(payload.get("pulse_index",0)),
+			"candidate_metric":best_metric,
+			"retained_metric":float(previous_record.get("peak_metric",-1.0)),
+		})
+		return
+	var mission_label := "正式任务 03" if event_type == "waypoint_drift" else "正式任务 04"
+	Game.store_event_review(event_type,{
+		"event_type":event_type,
+		"event_id":str(payload.get("event_id",ExperimentLog.active_event_id())),
+		"mission_id":Game.selected_mission_id,
+		"mission_label":mission_label,
+		"event_time_s":best_time_s,
+		"attempt_number":attempt_number,
+		"peak_pulse_index":int(payload.get("pulse_index",1)),
+		"capture_kind":"target_peak",
+		"peak_metric":best_metric,
+		"peak_metric_name":"applied_waypoint_rotation_deg" if event_type == "waypoint_drift" else "observed_lateral_displacement",
+		"signed_disturbance_value":float(payload.get("angle_degrees",0.0)) if event_type == "waypoint_drift" else float(payload.get("strength",0.0)),
+		"target_event_position":_target_event_peak_position,
+		"views":best_views,
+	})
+	ExperimentLog.log_event("event_review_captured","system",{
+		"event_type":event_type,
+		"event_id":Game.event_review(event_type).get("event_id",""),
+		"capture_kind":"target_peak",
+		"peak_metric":best_metric,
+		"participant_views":best_views.keys(),
+	})
+
+
+func _capture_participant_views(focus_on_event: bool = false) -> Dictionary:
+	if not is_instance_valid(_navigator_view) or not is_instance_valid(_pilot_view):
+		return {}
+	var views := {}
+	for entry: Dictionary in [
+		{"role":"navigator","page":_navigator_view},
+		{"role":"pilot","page":_pilot_view},
+	]:
+		var role_name := str(entry.role)
+		var page := entry.page as Control
+		var image: Image
+		if DisplayServer.get_name() == "headless":
+			# 无图形测试后端没有可读纹理；用同尺寸帧验证保存与最终问卷链路。
+			image = Image.create(VIEW_SIZE.x,VIEW_SIZE.y,false,Image.FORMAT_RGB8)
+			image.fill(Color("101d2a"))
+		else:
+			image = _capture_page_region(page,role_name,focus_on_event)
+		var participant := Game.participant_id_for_role(role_name)
+		var key := participant if not participant.is_empty() else role_name
+		views[key] = {"role":role_name,"image":image}
+		# 非实验预览没有稳定参与者编号，角色键也便于测试和现场排查。
+		views[role_name] = views[key]
+	return views
+
+
+func _capture_page_region(page: Control,_role_name: String,_focus_on_event: bool) -> Image:
+	var viewport := page.get_viewport()
+	var full := viewport.get_texture().get_image()
+	if full == null or full.is_empty():
+		return full
+	var visible_size := viewport.get_visible_rect().size
+	var page_rect := page.get_global_rect()
+	var scale := Vector2(float(full.get_width())/maxf(visible_size.x,1.0),float(full.get_height())/maxf(visible_size.y,1.0))
+	var rect := Rect2i(
+		Vector2i(page_rect.position*scale),
+		Vector2i(page_rect.size*scale)
+	).intersection(Rect2i(Vector2i.ZERO,full.get_size()))
+	# 保存参与者当时看到的完整任务画面；回顾 UI 再按比例缩放，绝不裁掉边缘信息。
+	return full.get_region(rect) if rect.size.x > 0 and rect.size.y > 0 else full
+
+
+func _capture_mission_review(outcome: String,success: bool) -> void:
+	var mission_id := Game.selected_mission_id
+	var mission_number := maxi(MissionCatalog.IDS.find(mission_id),1)
+	var target_type: Variant = null
+	var target_exposed: Variant = null
+	if mission_id == "level_3":
+		target_type = "waypoint_drift"
+		target_exposed = _waypoint_drift_events > 0
+	elif mission_id == "level_4":
+		target_type = "ship_shear"
+		target_exposed = _ship_shear_events > 0
+	var target_record := Game.event_review(str(target_type)) if target_type != null else {}
+	var record := {
+		"event_type":"mission_responsibility",
+		"event_id":str(target_record.get("event_id","%s-mission-review-attempt-%d" % [mission_id,Game.current_mission_attempt_number()])),
+		"mission_id":mission_id,
+		"mission_label":"正式任务 %02d" % mission_number,
+		"elapsed":_mission_elapsed,
+		"outcome":outcome,
+		"success":success,
+		"attempt_number":Game.current_mission_attempt_number(),
+		"target_event_type":target_type,
+		"target_event_exposed":target_exposed,
+		"target_event_pulse_count":_waypoint_drift_events if mission_id == "level_3" else _ship_shear_events,
+		# 第一、二关评价整关，不展示意义不明的结尾截图。
+		"views":target_record.get("views",{}) if not target_record.is_empty() else {},
+		"capture_kind":target_record.get("capture_kind","none"),
+		"event_time_s":target_record.get("event_time_s",null),
+		"peak_metric":target_record.get("peak_metric",null),
+		"target_event_position":target_record.get("target_event_position",_target_event_peak_position),
+		"target_event_positions":_target_event_positions.duplicate(),
+		"flight_trail":_flight_trail.duplicate(),
+		"failed_flight_trails":_failed_flight_trails.duplicate(true),
+		"collision_points":_collision_points.duplicate(),
+		"flight_start":_world_to_trail(Game.current_sector.spawn_position) if Game.current_sector != null else Vector2.ZERO,
+		"flight_goal":_world_to_trail(Game.objective_body().world_position) if Game.objective_body() != null else Vector2.ZERO,
+		"flight_world_bounds":_mission_flight_bounds(),
+	}
+	Game.store_event_review(mission_id,record)
+	ExperimentLog.log_event("mission_review_captured","system",{
+		"mission_id":mission_id,
+		"event_id":Game.event_review(mission_id).get("event_id",""),
+		"capture_kind":record.capture_kind,
+		"participant_views":record.views.keys(),
+	})
+
+
+func _mission_flight_bounds() -> Rect2:
+	if Game.current_sector == null:
+		return Rect2(-100.0,-60.0,200.0,120.0)
+	for belt: BeltData in Game.current_sector.belts:
+		if belt.is_boundary and belt.shape == BeltData.Shape.RING:
+			var horizontal := belt.inner_radius * belt.aspect
+			var vertical := belt.inner_radius
+			return Rect2(
+				Vector2(belt.center.x-horizontal,belt.center.z-vertical),
+				Vector2(horizontal*2.0,vertical*2.0)
+			)
+	var points := Game.current_sector.route_checkpoints
+	if points.is_empty():
+		return Rect2(-100.0,-60.0,200.0,120.0)
+	var min_point := _world_to_trail(points[0])
+	var max_point := min_point
+	for point: Vector3 in points:
+		var p := _world_to_trail(point)
+		min_point.x = minf(min_point.x,p.x); min_point.y = minf(min_point.y,p.y)
+		max_point.x = maxf(max_point.x,p.x); max_point.y = maxf(max_point.y,p.y)
+	return Rect2(min_point,max_point-min_point).grow(18.0)
 
 
 func _on_safe_gate_crossed(index: int,anchor: Vector3) -> void:
+	if not _target_event_record.is_empty() and not _target_event_written:
+		_target_event_record["time_to_safe_gate_ms"] = _target_event_elapsed_s*1000.0
+		_finalize_target_event("safe_gate_reached")
 	ExperimentLog.log_event("safe_gate_crossed","system",{
 		"index":index,"anchor_x":anchor.x,"anchor_z":anchor.z
 	})
@@ -957,10 +1418,14 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	if _mission_ended or _mission_finishing:
 		return
 	_mission_finishing = true
+	_finalize_target_event("mission_success" if success else "mission_failure")
 	GameAudio.stop_ship_motion()
 	GameAudio.finish_mission_audio()
 	_mission_outcome = outcome
 	Engine.time_scale = 1.0
+	# 结果动画覆盖任务页之前，整理整关航迹；第三、四关同时挂接目标异常峰值画面。
+	if Game.selected_mission_id in ["level_1","level_2","level_3","level_4"]:
+		_capture_mission_review(outcome,success)
 	if not success:
 		# 时间耗尽才是失败条件；此时以完整爆炸反馈结束当前飞行。
 		if Game.ship_alive:
@@ -971,15 +1436,39 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	_mission_ended = true
 	var limit := Game.current_sector.time_limit_s if Game.current_sector != null else _mission_elapsed
 	var summary := {
+		"mission_id":Game.selected_mission_id,
 		"outcome":outcome,"success":success,"elapsed":_mission_elapsed,"limit":limit,
+		"timed":Game.selected_mission_id!="practice",
 		"revivals":_mission_deaths,"hits":_mission_hits,"waypoints":_mission_waypoints,"hull":Game.hull,
 		"severe_heading_deviations":_severe_heading_deviations,
 		"waypoint_drift_events":_waypoint_drift_events,
 		"ship_shear_events":_ship_shear_events,
+		"target_event_triggered":(_waypoint_drift_events+_ship_shear_events)>0,
 	}
+	_mission_summary = summary.duplicate(true)
 	ExperimentLog.log_event("mission_end","system",summary)
+	ExperimentLog.record_mission(summary)
 	await _show_result_flow(outcome,success,summary)
-	_show_surveys(outcome,summary)
+	if Game.selected_mission_id == "practice":
+		_show_surveys(outcome,summary)
+	elif Game.selected_mission_id in ["level_3","level_4"]:
+		var review := _required_review()
+		if review.is_empty():
+			_show_mission_attribution_surveys()
+		else:
+			ExperimentLog.log_event("mission_review_required","system",{
+				"reason":review.code,
+				"mission_id":Game.selected_mission_id,
+			})
+			_show_experiment_review(str(review.message))
+	else:
+		# 正常正式关只提供行为基线，不做事件责任归因或状态问卷。
+		_dismiss_result_panels()
+		await _complete_unmeasured_mission()
+		return
+	# 下一层先盖住飞行总结，随后再移除总结；任何一帧都不会露出驾驶舱。
+	await get_tree().process_frame
+	_dismiss_result_panels()
 
 
 func _show_result_flow(outcome: String,success: bool,summary: Dictionary) -> void:
@@ -1000,30 +1489,160 @@ func _show_result_flow(outcome: String,success: bool,summary: Dictionary) -> voi
 		if is_instance_valid(panel):
 			panel.show_summary(summary)
 	await get_tree().create_timer(2.8,true,false,true).timeout
+	# 保持总结页，直到责任分配／训练检查／实验员复核已经覆盖在它上面。
+
+
+func _dismiss_result_panels() -> void:
 	for panel: Control in _result_panels:
-		if is_instance_valid(panel):
-			panel.queue_free()
+		if is_instance_valid(panel): panel.queue_free()
 	_result_panels.clear()
-	await get_tree().process_frame
 
 
 func _show_surveys(outcome: String,summary: Dictionary) -> void:
 	GameAudio.play_ui_popup_open()
-	var nav: Control = SurveyPanelScript.new(); _navigator_view.add_child(nav); nav.setup("navigator",outcome,summary); nav.submitted.connect(_on_survey_submitted)
-	var pilot: Control = SurveyPanelScript.new(); _pilot_view.add_child(pilot); pilot.setup("pilot",outcome,summary); pilot.submitted.connect(_on_survey_submitted)
+	_show_survey_for_role("navigator",outcome,summary)
+	_show_survey_for_role("pilot",outcome,summary)
+
+
+func _show_survey_for_role(role: String,outcome: String,summary: Dictionary) -> void:
+	var parent: Control = _navigator_view if role == "navigator" else _pilot_view
+	if parent == null or parent.get_node_or_null("SurveyPanel_%s" % role) != null:
+		return
+	var panel: Control = SurveyPanelScript.new()
+	parent.add_child(panel)
+	panel.setup(role,outcome,summary)
+	panel.submitted.connect(_on_survey_submitted)
 
 
 func _on_survey_submitted(role: String, answers: Dictionary) -> void:
-	_survey_answers[role]=answers; ExperimentLog.record_survey(role,"mission_end",answers)
-	if _survey_answers.size() >= 2:
-		# 两人均提交才算真正玩完本关；完成、超时等结果都锁住本关并推进队列。
-		Game.mark_current_mission_played(_mission_outcome)
-		var sequence_finished := Game.active_mission_id().is_empty()
-		await get_tree().create_timer(0.8).timeout
-		Game.set_view_mode(Game.ViewMode.SPLIT)
-		if sequence_finished:
-			# 最后一关量表落盘后结束本次实验，再进入双屏共享的感谢页。
-			ExperimentLog.close_session()
-			get_tree().change_scene_to_file("res://scenes/thank_you.tscn")
-		else:
-			get_tree().change_scene_to_file("res://scenes/level_select.tscn")
+	if _survey_answers.has(role):
+		return
+	var linked_answers := answers.duplicate(true)
+	var mission_review := Game.event_review(Game.selected_mission_id)
+	linked_answers["target_event_applicable"] = str(mission_review.get("target_event_type","")) in ["waypoint_drift","ship_shear"]
+	linked_answers["target_event_exposed"] = mission_review.get("target_event_exposed",null)
+	linked_answers["target_event_type"] = mission_review.get("target_event_type",null)
+	_survey_answers[role] = linked_answers
+	ExperimentLog.record_survey(role,str(mission_review.get("event_id","mission_end")),linked_answers)
+	if _survey_answers.size() < 2:
+		return
+	if Game.selected_mission_id == "practice":
+		var review := _required_review()
+		if not review.is_empty():
+			_show_experiment_review(str(review.message))
+			await get_tree().process_frame
+			_clear_questionnaire_panels("SurveyPanel_")
+			return
+	await _complete_mission_questionnaires()
+
+
+func _required_review() -> Dictionary:
+	if Game.selected_mission_id == "practice":
+		for answer: Dictionary in _survey_answers.values():
+			if bool(answer.get("training_review_required",false)):
+				return {
+					"code":"training_comprehension",
+					"message":"至少一名参与者对操作规则选择了“不确定”或“否”。\n请实验员重新说明对应规则，再让两名参与者重做训练关。",
+				}
+	if Game.selected_mission_id in ["level_3","level_4"]:
+		var exposed := _waypoint_drift_events > 0 if Game.selected_mission_id == "level_3" else _ship_shear_events > 0
+		if not exposed:
+			return {
+				"code":"target_event_unexposed",
+				"message":"本关在结束前没有实际触发预设的目标异常，因此不能进入主要归因分析。\n请实验员确认后重试本关。",
+			}
+		var event_type := "waypoint_drift" if Game.selected_mission_id == "level_3" else "ship_shear"
+		if Game.event_review(event_type).is_empty():
+			return {
+				"code":"event_review_missing",
+				"message":"目标异常已经发生，但事件画面没有成功保存。\n请实验员确认后重试本关。",
+			}
+	if Game.selected_mission_id in ["level_1","level_2","level_3","level_4"]:
+		if Game.event_review(Game.selected_mission_id).is_empty():
+			return {
+				"code":"mission_review_missing",
+				"message":"本关结束画面没有成功保存，无法进入责任分配。\n请实验员确认后重试本关。",
+			}
+	return {}
+
+
+func _show_mission_attribution_surveys() -> void:
+	GameAudio.play_ui_popup_open()
+	var record := Game.event_review(Game.selected_mission_id)
+	for entry: Dictionary in [
+		{"role":"navigator","parent":_navigator_view},
+		{"role":"pilot","parent":_pilot_view},
+	]:
+		var role_name := str(entry.role)
+		var panel: Control = MissionAttributionPanelScript.new()
+		(entry.parent as Control).add_child(panel)
+		panel.setup(role_name,Game.participant_id_for_role(role_name),record)
+		panel.submitted.connect(_on_mission_attribution_submitted)
+
+
+func _on_mission_attribution_submitted(role: String,answer: Dictionary) -> void:
+	if _mission_attribution_answers.has(role):
+		return
+	_mission_attribution_answers[role] = answer.duplicate(true)
+	ExperimentLog.record_survey(role,str(answer.get("event_id","mission_responsibility:%s" % Game.selected_mission_id)),answer)
+	# 每名参与者独立连续作答：责任分配完成后立即进入自己的状态信任，
+	# 不在两个量表之间设置双人同步点。
+	_show_survey_for_role(role,_mission_outcome,_mission_summary)
+	await get_tree().process_frame
+	var parent: Control = _navigator_view if role == "navigator" else _pilot_view
+	var attribution: Node = parent.get_node_or_null("MissionAttribution_%s" % role) if parent != null else null
+	if attribution != null:
+		attribution.queue_free()
+
+
+func _complete_mission_questionnaires() -> void:
+	# 每人连续完成责任分配和即时状态信任；这里只设置唯一一次双人等待。
+	Game.mark_current_mission_played(_mission_outcome)
+	var sequence_finished := Game.active_mission_id().is_empty()
+	await get_tree().create_timer(0.8).timeout
+	if sequence_finished:
+		ExperimentLog.close_session()
+		get_tree().change_scene_to_file("res://scenes/thank_you.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/level_select.tscn")
+
+
+func _complete_unmeasured_mission() -> void:
+	Game.mark_current_mission_played(_mission_outcome)
+	var sequence_finished := Game.active_mission_id().is_empty()
+	await get_tree().create_timer(0.8).timeout
+	if sequence_finished:
+		ExperimentLog.close_session()
+		get_tree().change_scene_to_file("res://scenes/thank_you.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/level_select.tscn")
+
+
+func _clear_questionnaire_panels(prefix: String) -> void:
+	for parent: Control in [_navigator_view,_pilot_view]:
+		for child: Node in parent.get_children():
+			if child.name.begins_with(prefix):
+				child.queue_free()
+
+
+func _show_experiment_review(message: String) -> void:
+	GameAudio.play_ui_popup_open()
+	for entry: Dictionary in [
+		{"role":"navigator","parent":_navigator_view},
+		{"role":"pilot","parent":_pilot_view},
+	]:
+		var panel: Control = ExperimentReviewPanelScript.new()
+		(entry.parent as Control).add_child(panel)
+		panel.setup(entry.role,message)
+		panel.retry_confirmed.connect(_on_review_retry_confirmed)
+
+
+func _on_review_retry_confirmed() -> void:
+	if _review_transitioning:
+		return
+	_review_transitioning = true
+	ExperimentLog.log_event("mission_review_retry_confirmed","system",{
+		"mission_id":Game.selected_mission_id,
+	})
+	Game.reset_run()
+	get_tree().reload_current_scene()

@@ -7,6 +7,7 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	root.get_node("Game").set("experiment_mode", false)
 	var main := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(main)
 	await process_frame
@@ -55,5 +56,30 @@ func _run() -> void:
 	assert(not paused, "pause exit must unpause before changing scenes")
 	main.queue_free()
 	await process_frame
+
+	# 实验模式只有新手关可退回重新选择岗位；正式关不允许借暂停菜单换岗。
+	var game := root.get_node("Game")
+	game.set("experiment_mode", true)
+	game.set("selected_mission_id", "practice")
+	var practice_menu := PauseMenu.new()
+	root.add_child(practice_menu)
+	practice_menu.setup("navigator")
+	assert(_action_labels(practice_menu) == ["继续游戏", "回到角色选择"], "practice must allow returning to role selection")
+	practice_menu.queue_free()
+	await process_frame
+	game.set("selected_mission_id", "level_1")
+	var formal_menu := PauseMenu.new()
+	root.add_child(formal_menu)
+	formal_menu.setup("navigator")
+	assert(_action_labels(formal_menu) == ["继续游戏"], "formal missions must keep locked roles")
 	print("PAUSE_MENU_TEST_OK screens=2 escape=root+raw exit=global+deduplicated order=safe")
 	quit(0)
+
+
+func _action_labels(menu: Node) -> Array[String]:
+	var labels: Array[String] = []
+	var actions := menu.find_child("PauseActions", true, false)
+	for child: Node in actions.get_children():
+		if child is Button:
+			labels.append((child as Button).text)
+	return labels

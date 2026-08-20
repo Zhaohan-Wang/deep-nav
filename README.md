@@ -65,7 +65,7 @@
 
 ## 结算与量表
 
-任务结束先看结果图，再各自填三页短量表：客观航向事件归因、搭档状态信任、系统状态信任。量表用平铺选项和圆形滑钮，不用下拉弹窗，避免挡住虚拟光标。
+任务结束先看结果图，再各自完成责任分配，并分别评价搭档、领航系统和飞船控制系统。目标异常关只客观回顾发生了什么，不在评分页重复具体原因或原因不明。量表用平铺选项和圆形滑钮，不用下拉弹窗，避免挡住虚拟光标。
 
 量表的构念、角色分流、成功/失败处理和新旧字段见 [关末量表重构说明](docs/questionnaire_redesign.md)。
 
@@ -101,10 +101,8 @@ macOS 上大致对应：
 - `session.csv`：会话元数据
 - `events.csv`：双方航点、碰撞、中继站、扰动提示、任务结束、量表提交
 - `frames.csv`：每个物理帧的双方席位、光标、按键、驾驶输入和飞船状态
-- `audio/session.caf`：单设备整场 16-bit PCM 原始录音
-- `audio/audio_metadata.json`：录音时间戳、采样率、声道、帧数和完整性状态
 
-CSV 磁盘写入与录音都不在游戏主循环中执行。详细分组规则、字段和现场检查见 [实验数据说明](docs/experiment_data.md)。
+CSV 磁盘写入不在游戏主循环中执行。详细分组规则、字段和现场检查见 [实验数据说明](docs/experiment_data.md)。
 
 标题页的 **打开数据文件夹** 会先创建 `user://experiments/`，再用系统文件管理器打开，行为和 [Dyadic Force](https://github.com/Zhaohan-Wang/dyadic-force) 一致。
 
@@ -125,10 +123,9 @@ tools/run.sh
 
 ```bash
 tools/build_macos_hid_bridge.sh
-tools/build_macos_audio_recorder.sh
 ```
 
-制作包含双鼠标桥、录音 helper 和新应用图标的独立 macOS 包：
+制作包含双鼠标桥和应用图标的独立 macOS 包：
 
 ```bash
 tools/package_macos.sh
@@ -138,23 +135,25 @@ tools/package_macos.sh
 
 ## 校验
 
-改关卡或交互后，按 [制作循环](docs/development_loop.md) 走，不要跳过失败阶段继续堆功能。
+日常修改先跑关键回归；改地图时追加地图专项；正式打包前再跑完整回归。图形性能实测独立运行，单次启动会依次测完五关，并在异常卡顿时自动超时退出。
 
 ```bash
 tools/validate_project.sh
-tools/validate_runtime.sh
+tools/validate_project.sh --maps
+tools/validate_project.sh --full
+tools/validate_performance.sh
 ```
 
 成功标志：
 
 ```text
-DEEP_NAV_FULL_VALIDATION_OK
-DEEP_NAV_RUNTIME_VALIDATION_OK
+DEEP_NAV_VALIDATION_OK
+PERFORMANCE_VALIDATION_OK
 ```
 
 ## 架构
 
-- Autoload：`Game` / `AudioRecorder` / `ExperimentLog` / `RawMice` / `Displays`
+- Autoload：`Game` / `GameAudio` / `ExperimentLog` / `RawMice` / `Displays`
 - 关卡目录：`scripts/mission_catalog.gd`
 - 双屏与虚拟光标：`scripts/display_coordinator.gd`
 - 实验写盘：`scripts/experiment_log.gd`

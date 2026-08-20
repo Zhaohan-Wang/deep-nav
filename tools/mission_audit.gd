@@ -55,7 +55,7 @@ func _run() -> void:
 			_check(mission.safe_gate_points.size() >= mission.disturbance_anchors.size(), "%s 每个扰动后都必须有独立安全门" % mission.id)
 			for i: int in mini(mission.disturbance_anchors.size(),mission.safe_gate_points.size()):
 				var recovery: float = _route_progress(mission.safe_gate_points[i],mission.route_checkpoints) - _route_progress(mission.disturbance_anchors[i],mission.route_checkpoints)
-				_check(recovery >= 48.0 and recovery <= 120.0, "%s 第 %d 个扰动后到安全门的反应航程不合理" % [mission.id,i + 1])
+				_check(recovery >= 48.0 and recovery <= 120.0, "%s 第 %d 个扰动后到安全门的反应航程不合理（当前 %.1f u）" % [mission.id,i + 1,recovery])
 		var dest := _body(mission, mission.objective_body_id)
 		_check(dest != null, "%s 缺少终点" % mission.id)
 		if dest != null:
@@ -96,7 +96,7 @@ func _run() -> void:
 			_check(open_ring_count == 0 and spline_count == 4,
 				"level_3 必须保持两段双样条井廊，不能重新变成 level_1 的环带")
 			_check(mission.disturbance_slots == PackedStringArray(["waypoint_drift"]),
-				"level_3 必须且只能包含一次航点漂移")
+				"level_3 必须只包含一次核心航点漂移")
 			var blocker := _body(mission,"ring")
 			var rejoin_guard := _body(mission,"cinder")
 			var entry_star := _body(mission,"sol")

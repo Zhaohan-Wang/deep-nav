@@ -51,6 +51,10 @@ var last_waypoint_applied: Vector3 = Vector3.ZERO
 var view_mode: int = ViewMode.SPLIT
 var mission_complete: bool = false
 var ship_alive: bool = true
+## 由主任务场景逐帧同步，供两块角色屏和结算页读取同一计时状态。
+var mission_elapsed_s: float = 0.0
+var mission_time_limit_s: float = 0.0
+var mission_timer_active: bool = false
 var selected_mission_id: String = "practice"
 ## 本次应用运行内的临时关卡进度；不写 settings.cfg，退出应用即自然清空。
 var session_mission_index: int = 0
@@ -62,11 +66,10 @@ var screen_shake_enabled: bool = true
 var fullscreen_dual_display: bool = true
 var waypoint_cooldown_s: float = 4.0
 var waypoint_max_distance: float = 72.0
-const WAYPOINT_READY_NOTICE_S: float = 2.0
 const SETTINGS_PATH := "user://settings.cfg"
 ## 每次需要参与者重新确认声音、动态效果和 macOS 权限说明时递增。
 const SETTINGS_REVISION: int = 2
-const EXPERIMENT_PROTOCOL_VERSION := "attribution-2.2"
+const EXPERIMENT_PROTOCOL_VERSION := "in-game-measures-4.2"
 var settings_revision: int = 0
 var dyad_sequence: int = 0
 var dyad_id: String = ""
@@ -74,11 +77,20 @@ var participant_a: String = ""
 var participant_b: String = ""
 var participant_a_seat: int = 0
 var attribution_condition: String = ""
+var condition_assignment_method: String = ""
+var condition_assignment_token: String = ""
 var experiment_setup_locked: bool = false
+## 新手关不锁岗位；首次进入正式关时保存屏幕 A 的岗位，后续正式关沿用。
+var formal_roles_locked: bool = false
+var locked_primary_role: int = 0
+## 两个预设异常的中性回顾资料跨关保存在内存中；新实验序列开始时清空。
+var event_review_records: Dictionary = {}
+var mission_attempt_counts: Dictionary = {}
 var _last_waypoint_msec: int = -1
 var _triggered_disturbances: Dictionary = {}
 var _triggered_safe_gates: Dictionary = {}
-var _pending_waypoint_drift_deg: float = 0.0
+## 扰动门经过时可能恰好没有活动航点；用队列保留每一次脉冲，避免后来的随机值覆盖前一次。
+var _pending_waypoint_drifts: Array[float] = []
 var _reached_relays: Dictionary = {}
 var last_relay_index: int = -1
 
@@ -115,11 +127,36 @@ func select_mission(id: String) -> void:
 func begin_mission_sequence() -> void:
 	session_mission_index = 0
 	session_mission_results.clear()
+	event_review_records.clear()
+	mission_attempt_counts.clear()
+	formal_roles_locked = false
+	locked_primary_role = 0
 	select_mission(Catalog.IDS[0])
 
 
-## 组号同时完成两个平衡：奇偶分配“明确/模糊”，每四组翻转一次 A/B 屏幕侧别。
-## 这样实验条件不会与固定主屏/副屏绑定。
+func note_mission_attempt() -> int:
+	var attempt := int(mission_attempt_counts.get(selected_mission_id,0)) + 1
+	mission_attempt_counts[selected_mission_id] = attempt
+	return attempt
+
+
+func current_mission_attempt_number() -> int:
+	return maxi(int(mission_attempt_counts.get(selected_mission_id,1)),1)
+
+
+func store_event_review(event_type: String,record: Dictionary) -> void:
+	event_review_records[event_type] = record
+
+
+func event_review(event_type: String) -> Dictionary:
+	return event_review_records.get(event_type,{}) as Dictionary
+
+
+func has_mission_review(mission_id: String) -> bool:
+	return event_review_records.has(mission_id)
+
+
+## 条件在锁定实验组时运行时随机分配。组号只负责稳定编号和屏幕侧别，不再决定条件。
 func lock_experiment_setup(sequence: int) -> bool:
 	if sequence <= 0:
 		return false
@@ -127,7 +164,15 @@ func lock_experiment_setup(sequence: int) -> bool:
 	dyad_id = "D%03d" % sequence
 	participant_a = "%sA" % dyad_id
 	participant_b = "%sB" % dyad_id
-	attribution_condition = "explicit" if sequence % 2 == 1 else "ambiguous"
+	# 正式实验固定玩法参数，不继承预览模式中的本机设置。
+	waypoint_cooldown_s = 4.0
+	waypoint_max_distance = 72.0
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var token := rng.randi()
+	attribution_condition = "explicit" if posmod(token,2) == 0 else "ambiguous"
+	condition_assignment_method = "runtime_random_1_to_1"
+	condition_assignment_token = str(token)
 	var block := posmod(sequence - 1,4)
 	participant_a_seat = 0 if block < 2 else 1
 	experiment_setup_locked = true
@@ -141,13 +186,38 @@ func clear_experiment_setup() -> void:
 	participant_b = ""
 	participant_a_seat = 0
 	attribution_condition = ""
+	condition_assignment_method = ""
+	condition_assignment_token = ""
 	experiment_setup_locked = false
+	formal_roles_locked = false
+	locked_primary_role = 0
+
+
+func lock_formal_roles(primary_role: int) -> void:
+	locked_primary_role = 0 if primary_role == 0 else 1
+	formal_roles_locked = true
+
+
+func formal_role_for_primary_screen() -> int:
+	return locked_primary_role
 
 
 func participant_id_for_seat(seat: int) -> String:
 	if not experiment_setup_locked:
 		return ""
 	return participant_a if seat == participant_a_seat else participant_b
+
+
+func participant_id_for_role(role: String) -> String:
+	if role not in ["navigator","pilot"]:
+		return ""
+	var displays := get_node_or_null("/root/Displays")
+	if displays == null:
+		return ""
+	for seat: int in [0,1]:
+		if String(displays.call("role_name_for_seat",seat)) == role:
+			return participant_id_for_seat(seat)
+	return ""
 
 
 func participant_letter_for_seat(seat: int) -> String:
@@ -264,9 +334,12 @@ func reset_run() -> void:
 	_last_waypoint_msec = -1
 	mission_complete = false
 	ship_alive = true
+	mission_elapsed_s = 0.0
+	mission_time_limit_s = current_sector.time_limit_s if current_sector != null else 0.0
+	mission_timer_active = current_sector != null and current_sector.id != "practice"
 	_triggered_disturbances.clear()
 	_triggered_safe_gates.clear()
-	_pending_waypoint_drift_deg = 0.0
+	_pending_waypoint_drifts.clear()
 	_reached_relays.clear()
 	last_relay_index = -1
 	hull_changed.emit(hull)
@@ -316,9 +389,8 @@ func set_waypoint(world_pos: Vector3) -> bool:
 		waypoint_request_result.emit(false,"boundary",0.0)
 		return false
 	waypoint = requested
-	if not is_zero_approx(_pending_waypoint_drift_deg):
-		var pending := _pending_waypoint_drift_deg
-		_pending_waypoint_drift_deg = 0.0
+	if not _pending_waypoint_drifts.is_empty():
+		var pending := float(_pending_waypoint_drifts.pop_front())
 		_apply_waypoint_drift(pending,"next_waypoint",false)
 	last_waypoint_applied = waypoint
 	has_waypoint = true
@@ -332,11 +404,18 @@ func trigger_waypoint_drift(angle_degrees: float) -> void:
 	if has_waypoint:
 		_apply_waypoint_drift(angle_degrees,"active_waypoint",true)
 	else:
-		_pending_waypoint_drift_deg = angle_degrees
-		disturbance_effect_applied.emit("waypoint_drift_armed",{
-			"angle_degrees":angle_degrees,
-			"reason":"no_active_waypoint",
-		})
+		arm_waypoint_drift(angle_degrees,"no_active_waypoint")
+
+
+## 实验关只武装下一次领航点击，不移动已经显示的航点。
+## 因此参与者只会看到偏移后的最终航点，不会看到标记先落下再突然跳动。
+func arm_waypoint_drift(angle_degrees: float,reason: String = "disturbance_zone") -> void:
+	_pending_waypoint_drifts.append(angle_degrees)
+	disturbance_effect_applied.emit("waypoint_drift_armed",{
+		"angle_degrees":angle_degrees,
+		"reason":reason,
+		"queued_pulse_count":_pending_waypoint_drifts.size(),
+	})
 
 
 func _apply_waypoint_drift(angle_degrees: float,timing: String,notify_waypoint: bool) -> void:
@@ -370,7 +449,7 @@ func waypoint_cooldown_readiness(now_msec: int = -1) -> float:
 	return clampf(1.0-waypoint_cooldown_remaining(now_msec)/waypoint_cooldown_s,0.0,1.0)
 
 
-## 冷却中持续显示；完成后绿色提示两秒；从未使用或提示超时后完全隐藏。
+## 使用过航点后始终显示唯一状态：冷却中或已就绪。只有从未使用时隐藏。
 func waypoint_cooldown_display_state(now_msec: int = -1) -> String:
 	if _last_waypoint_msec < 0:
 		return "hidden"
@@ -378,9 +457,7 @@ func waypoint_cooldown_display_state(now_msec: int = -1) -> String:
 	var elapsed_s := float(now-_last_waypoint_msec)/1000.0
 	if elapsed_s < waypoint_cooldown_s:
 		return "cooling"
-	if elapsed_s < waypoint_cooldown_s+WAYPOINT_READY_NOTICE_S:
-		return "ready"
-	return "hidden"
+	return "ready"
 
 
 func clear_waypoint() -> void:
@@ -549,6 +626,41 @@ func objective_body() -> CelestialBodyData:
 	if current_sector == null:
 		return null
 	return find_body(current_sector.objective_body_id)
+
+
+func objective_distance() -> float:
+	var destination := objective_body()
+	if destination == null:
+		return 0.0
+	return Vector3(ship_position.x,0.0,ship_position.z).distance_to(Vector3(destination.world_position.x,0.0,destination.world_position.z))
+
+
+func mission_progress_ratio() -> float:
+	if current_sector == null:
+		return 0.0
+	var points := current_sector.route_checkpoints
+	if points.size() < 2:
+		var destination := objective_body()
+		if destination == null:
+			return 0.0
+		var start_distance := current_sector.spawn_position.distance_to(destination.world_position)
+		return clampf(1.0-objective_distance()/maxf(start_distance,0.001),0.0,1.0)
+	var walked := 0.0
+	var total := 0.0
+	var best_distance := INF
+	var best_progress := 0.0
+	for i: int in range(points.size()-1):
+		var a: Vector3 = points[i]
+		var ab: Vector3 = points[i+1]-a
+		var length := ab.length()
+		var t := clampf((ship_position-a).dot(ab)/maxf(ab.length_squared(),0.001),0.0,1.0)
+		var distance := ship_position.distance_to(a+ab*t)
+		if distance < best_distance:
+			best_distance = distance
+			best_progress = walked+length*t
+		walked += length
+		total += length
+	return clampf(best_progress/maxf(total,0.001),0.0,1.0)
 
 
 func _boundary_belt() -> BeltData:

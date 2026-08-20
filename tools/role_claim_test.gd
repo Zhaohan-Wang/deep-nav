@@ -74,6 +74,49 @@ func _run() -> void:
 	assert(displays.primary_role() == displays.Role.PILOT, "set_primary_role must assign the primary screen role")
 	displays.set_primary_role(displays.Role.NAVIGATOR)
 	assert(displays.primary_role() == displays.Role.NAVIGATOR, "set_primary_role must restore navigator")
+
+	# 新手关自由认领，不产生正式岗位锁定。
+	page.queue_free()
+	await process_frame
+	game.set("experiment_mode", true)
+	game.call("clear_experiment_setup")
+	assert(game.call("lock_experiment_setup", 901), "experiment setup must lock")
+	game.call("begin_mission_sequence")
+	var experiment_page := (load("res://scenes/level_select.tscn") as PackedScene).instantiate()
+	root.add_child(experiment_page)
+	for i: int in range(4):
+		await process_frame
+	experiment_page.call("_open_confirm")
+	for i: int in range(2):
+		await process_frame
+	assert((experiment_page.get("_role_claims") as Array).has(SEAT_NONE), "practice roles must start unclaimed")
+	assert(not bool(game.get("formal_roles_locked")), "practice must not lock formal roles")
+
+	# 第 1 关仍自由选择；确认后锁定，并由第 2、3、4 关沿用。
+	experiment_page.call("_close_confirm")
+	experiment_page.queue_free()
+	await process_frame
+	game.call("mark_current_mission_played", "完成")
+	var level_one_page := (load("res://scenes/level_select.tscn") as PackedScene).instantiate()
+	root.add_child(level_one_page)
+	for i: int in range(3):
+		await process_frame
+	level_one_page.call("_open_confirm")
+	await process_frame
+	assert((level_one_page.get("_role_claims") as Array).has(SEAT_NONE), "level 1 must allow free role choice")
+	game.call("lock_formal_roles", displays.Role.PILOT)
+	level_one_page.call("_close_confirm")
+	level_one_page.queue_free()
+	await process_frame
+	game.call("mark_current_mission_played", "完成")
+	var locked_page := (load("res://scenes/level_select.tscn") as PackedScene).instantiate()
+	root.add_child(locked_page)
+	for i: int in range(3):
+		await process_frame
+	locked_page.call("_open_confirm")
+	await process_frame
+	assert(_claims(locked_page) == [SEAT_B, SEAT_A], "level 2 must restore the level 1 role choice")
+	assert(not (locked_page.get("_start_button") as Button).disabled, "locked formal roles must be ready immediately")
 	print("ROLE_CLAIM_OK")
 	quit(0)
 

@@ -8,13 +8,21 @@ const COLLISION_LAYER: int = 8
 const FLIGHT_ROCK_VISIBILITY_RANGE: float = 520.0
 const DECORATIVE_ROCK_VISIBILITY_RANGE: float = 460.0
 const ROCK_VISIBILITY_MARGIN: float = 90.0
+const PALETTES: Array = [
+	[Color("a3a8c2"),Color("4c6885"),Color("2a2e4a")],
+	[Color("8a7a84"),Color("4a3c48"),Color("1e1824")],
+	[Color("c4b49a"),Color("6a5a48"),Color("2c241c")],
+	[Color("7a8494"),Color("3a4450"),Color("181c24")],
+]
 
 
 var _light_dir: Vector3 = Vector3(0.42, 0.62, 0.48)
+var _batch_meshes: Array[SphereMesh] = []
 
 
 func setup(belts: Array[BeltData], light_dir: Vector3) -> void:
 	_light_dir = light_dir.normalized()
+	_prepare_batch_meshes()
 	for belt: BeltData in belts:
 		_spawn_belt(belt)
 
@@ -24,24 +32,16 @@ func _spawn_belt(belt: BeltData) -> void:
 		# 连续椭圆墙负责真正挡住飞船；碎石只是外形，避免从缝里钻出去。
 		_spawn_boundary_wall(belt)
 
+	var batches: Array = [[],[],[],[]]
+	var collision_body := _make_collision_body(belt)
 	for sample: Dictionary in Layout.samples(belt):
 		var visual_rng: RandomNumberGenerator = Layout.visual_rng(belt,int(sample["index"]))
-		_spawn_rock(Vector3(sample["position"]),float(sample["radius"]),visual_rng,float(sample["damage"]),
-			belt.is_boundary,bool(sample["hits_flight"]),float(sample["hit_radius"]),belt.id,int(sample["index"]))
-
-
-func _pick_palette(rng: RandomNumberGenerator) -> Array[Color]:
-	var lit: Array[Color] = [
-		Color("a3a8c2"), Color("8a7a84"), Color("c4b49a"), Color("7a8494")
-	]
-	var mid: Array[Color] = [
-		Color("4c6885"), Color("4a3c48"), Color("6a5a48"), Color("3a4450")
-	]
-	var shade: Array[Color] = [
-		Color("2a2e4a"), Color("1e1824"), Color("2c241c"), Color("181c24")
-	]
-	var idx: int = rng.randi_range(0, 3)
-	return [lit[idx], mid[idx], shade[idx]]
+		var entry := _visual_entry(sample,visual_rng)
+		(batches[int(entry["palette"])] as Array).append(entry)
+		if bool(sample["hits_flight"]):
+			_append_collision(collision_body,belt,sample)
+	for palette_index: int in range(PALETTES.size()):
+		_spawn_visual_batch(belt,palette_index,batches[palette_index] as Array)
 
 
 func _spawn_boundary_wall(belt: BeltData) -> void:
@@ -114,73 +114,118 @@ func _spawn_boundary_field_visual(wall: StaticBody3D,belt: BeltData,segment_coun
 	wall.add_child(visual)
 
 
-func _spawn_rock(pos: Vector3, radius: float, rng: RandomNumberGenerator, damage: float,
-		is_boundary: bool,hits_flight: bool,hit_radius: float,belt_id: String,sample_index: int) -> void:
-	# 小行星不是行星：放开三轴差异与表面起伏，避免每颗都像规则圆球。
-	var sx: float = rng.randf_range(0.76, 1.26)
-	var sy: float = rng.randf_range(0.68, 1.18)
-	var sz: float = rng.randf_range(0.78, 1.30)
-	var root := Node3D.new()
-	root.position = pos
-	root.set_meta("belt_id",belt_id)
-	root.set_meta("sample_index",sample_index)
-	root.set_meta("hits_flight",hits_flight)
-	root.set_meta("hit_radius",hit_radius)
-	add_child(root)
-	if hits_flight:
-		var body := StaticBody3D.new()
-		body.collision_layer = COLLISION_LAYER
-		body.collision_mask = 0
-		body.add_to_group("asteroid")
-		if is_boundary:
-			body.add_to_group("world_boundary")
-		body.set_meta("asteroid_damage", damage)
-		var bounce_mat := PhysicsMaterial.new()
-		bounce_mat.friction = 0.16
-		bounce_mat.bounce = 0.28
-		body.physics_material_override = bounce_mat
-		var col := CollisionShape3D.new()
-		var sphere := SphereShape3D.new()
-		sphere.radius = hit_radius
-		col.shape = sphere
-		body.add_child(col)
-		root.add_child(body)
+func _prepare_batch_meshes() -> void:
+	_batch_meshes.clear()
+	var rock_shader := load("res://shaders/pixel_asteroid_3d.gdshader") as Shader
+	for palette_value: Variant in PALETTES:
+		var palette := palette_value as Array
+		var mat := ShaderMaterial.new()
+		mat.shader = rock_shader
+		mat.set_shader_parameter("col_lit",palette[0])
+		mat.set_shader_parameter("col_mid",palette[1])
+		mat.set_shader_parameter("col_shade",palette[2])
+		mat.set_shader_parameter("light_dir",_light_dir)
+		var mesh := SphereMesh.new()
+		mesh.radius = 1.0
+		mesh.height = 2.0
+		mesh.radial_segments = 7
+		mesh.rings = 5
+		mesh.material = mat
+		_batch_meshes.append(mesh)
 
-	var mesh := SphereMesh.new()
-	mesh.radius = 1.0
-	mesh.height = 2.0
-	mesh.radial_segments = 7
-	mesh.rings = 5
-	var mat := ShaderMaterial.new()
-	mat.shader = load("res://shaders/pixel_asteroid_3d.gdshader") as Shader
-	var palette: Array[Color] = _pick_palette(rng)
-	mat.set_shader_parameter("col_lit", palette[0])
-	mat.set_shader_parameter("col_mid", palette[1])
-	mat.set_shader_parameter("col_shade", palette[2])
-	mat.set_shader_parameter("seed", rng.randf_range(1.1, 8.8))
-	mat.set_shader_parameter("pixels", clampf(radius * 22.0 + rng.randf_range(8.0, 14.0), 12.0, 28.0))
-	mat.set_shader_parameter("lump", rng.randf_range(0.13, 0.27))
-	mat.set_shader_parameter("light_dir", _light_dir)
-	mesh.material = mat
 
-	var visual := MeshInstance3D.new()
-	visual.set_script(load("res://scripts/world/asteroid_rock.gd") as Script)
-	visual.mesh = mesh
-	visual.scale = Vector3(radius * sx, radius * sy, radius * sz)
-	visual.rotation = Vector3(
-		rng.randf_range(0.0, TAU),
-		rng.randf_range(0.0, TAU),
-		rng.randf_range(0.0, TAU)
+func _make_collision_body(belt: BeltData) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	body.name = "%sColliders" % belt.id
+	body.collision_layer = COLLISION_LAYER
+	body.collision_mask = 0
+	body.add_to_group("asteroid")
+	if belt.is_boundary:
+		body.add_to_group("world_boundary")
+	body.set_meta("belt_id",belt.id)
+	var bounce_mat := PhysicsMaterial.new()
+	bounce_mat.friction = 0.16
+	bounce_mat.bounce = 0.28
+	body.physics_material_override = bounce_mat
+	add_child(body)
+	return body
+
+
+func _append_collision(body: StaticBody3D,belt: BeltData,sample: Dictionary) -> void:
+	var col := CollisionShape3D.new()
+	var sphere := SphereShape3D.new()
+	sphere.radius = float(sample["hit_radius"])
+	col.shape = sphere
+	col.position = Vector3(sample["position"])
+	col.set_meta("belt_id",belt.id)
+	col.set_meta("sample_index",int(sample["index"]))
+	col.set_meta("hit_radius",float(sample["hit_radius"]))
+	col.set_meta("asteroid_damage",float(sample["damage"]))
+	body.add_child(col)
+
+
+func _visual_entry(sample: Dictionary,rng: RandomNumberGenerator) -> Dictionary:
+	var radius := float(sample["radius"])
+	var scale := Vector3(
+		radius*rng.randf_range(0.76,1.26),
+		radius*rng.randf_range(0.68,1.18),
+		radius*rng.randf_range(0.78,1.30)
 	)
-	visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	visual.visibility_range_end = FLIGHT_ROCK_VISIBILITY_RANGE if hits_flight else DECORATIVE_ROCK_VISIBILITY_RANGE
-	visual.visibility_range_end_margin = ROCK_VISIBILITY_MARGIN
-	# 体积层只负责远景密度，不需要每颗都运行脚本；飞行层岩块保留慢速翻滚反馈。
-	if not hits_flight:
-		visual.process_mode = Node.PROCESS_MODE_DISABLED
-	visual.set("tumble", Vector3(
-		rng.randf_range(-0.55, 0.55),
-		rng.randf_range(-0.85, 0.85),
-		rng.randf_range(-0.45, 0.45)
-	))
-	root.add_child(visual)
+	var palette := rng.randi_range(0,PALETTES.size()-1)
+	var seed_value := rng.randf_range(1.1,8.8)
+	var pixels := clampf(radius*22.0+rng.randf_range(8.0,14.0),12.0,28.0)
+	var lump := rng.randf_range(0.13,0.27)
+	var rotation := Vector3(rng.randf_range(0.0,TAU),rng.randf_range(0.0,TAU),rng.randf_range(0.0,TAU))
+	var spin := rng.randf_range(0.14,0.85) * (-1.0 if rng.randf()<0.5 else 1.0)
+	return {
+		"palette":palette,
+		"transform":Transform3D(Basis.from_euler(rotation).scaled(scale),Vector3(sample["position"])),
+		"custom":Color(inverse_lerp(1.1,8.8,seed_value),inverse_lerp(12.0,28.0,pixels),
+			inverse_lerp(0.13,0.27,lump),inverse_lerp(-0.85,0.85,spin)),
+		"extent":maxf(scale.x,maxf(scale.y,scale.z))*1.35,
+		"sample_index":int(sample["index"]),
+		"hits_flight":bool(sample["hits_flight"]),
+	}
+
+
+func _spawn_visual_batch(belt: BeltData,palette_index: int,entries: Array) -> void:
+	if entries.is_empty():
+		return
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.use_custom_data = true
+	multi.mesh = _batch_meshes[palette_index]
+	multi.instance_count = entries.size()
+	var indices := PackedInt32Array()
+	var positions := PackedVector3Array()
+	var active_count := 0
+	var bounds := AABB()
+	var has_bounds := false
+	for i: int in range(entries.size()):
+		var entry: Dictionary = entries[i]
+		var transform: Transform3D = entry["transform"]
+		var custom: Color = entry["custom"]
+		multi.set_instance_transform(i,transform)
+		multi.set_instance_custom_data(i,custom)
+		indices.append(int(entry["sample_index"]))
+		positions.append(transform.origin)
+		if bool(entry["hits_flight"]): active_count += 1
+		var extent := Vector3.ONE*float(entry["extent"])
+		var rock_bounds := AABB(transform.origin-extent,extent*2.0)
+		bounds = rock_bounds if not has_bounds else bounds.merge(rock_bounds)
+		has_bounds = true
+	if has_bounds:
+		multi.custom_aabb = bounds
+	var batch := MultiMeshInstance3D.new()
+	batch.name = "%sPalette%d" % [belt.id,palette_index]
+	batch.multimesh = multi
+	batch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	batch.visibility_range_end = FLIGHT_ROCK_VISIBILITY_RANGE
+	batch.visibility_range_end_margin = ROCK_VISIBILITY_MARGIN
+	batch.set_meta("belt_id",belt.id)
+	batch.set_meta("sample_indices",indices)
+	batch.set_meta("sample_positions",positions)
+	batch.set_meta("rock_count",entries.size())
+	batch.set_meta("active_count",active_count)
+	batch.set_meta("decorative_count",entries.size()-active_count)
+	add_child(batch)

@@ -332,6 +332,13 @@ func _open_confirm() -> void:
 	if _selected == null or not Game.can_play_mission(_selected.id) or _confirm_layer != null:
 		return
 	_role_claims = [SEAT_NONE, SEAT_NONE]
+	if _selected.id != "practice" and Game.formal_roles_locked:
+		if Game.formal_role_for_primary_screen() == Displays.Role.NAVIGATOR:
+			_role_claims[0] = SEAT_A
+			_role_claims[1] = SEAT_B
+		else:
+			_role_claims[0] = SEAT_B
+			_role_claims[1] = SEAT_A
 	_claim_cards = []
 	_claim_status = []
 	_claim_hover = [false, false]
@@ -365,7 +372,10 @@ func _open_confirm() -> void:
 	var eyebrow := UI.label("MISSION START  /  CREW ASSIGNMENT",15,UI.MUTED)
 	eyebrow.add_theme_font_override("font",UI.FONT_BODY)
 	titles.add_child(eyebrow)
-	titles.add_child(UI.label("认领角色 · %02d %s" % [_selected.order_index,_selected.public_display_name()],38,UI.CYAN))
+	titles.add_child(UI.label(
+		("岗位已锁定" if _roles_are_locked_for_selected() else "认领角色")+" · %02d %s" % [_selected.order_index,_selected.public_display_name()],
+		38,UI.CYAN
+	))
 	var close := UI.button("✕ 关闭",Vector2(170,58))
 	UI.set_button_audio_cue(close,"popup_close")
 	close.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
@@ -377,7 +387,14 @@ func _open_confirm() -> void:
 	divider.custom_minimum_size.y = 2
 	box.add_child(divider)
 
-	var instruction := UI.label("两位成员分别用自己屏幕的鼠标点击下方卡片认领角色；认领结果决定任务中每块屏幕显示谁的画面。再次点击可取消认领。",20,UI.TEXT)
+	var instruction := UI.label(
+		("第 1 关确认的岗位已锁定，请核对各自屏幕对应的岗位。"
+		if _roles_are_locked_for_selected() else
+		("这是新手指引关，双方可自由认领岗位；本关选择不会锁定正式关岗位。"
+		if _selected.id == "practice" else
+		"这是首次正式关，双方可自由认领岗位；开始任务后，第 2、3、4 关将沿用本次选择。")),
+		20,UI.TEXT
+	)
 	instruction.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(instruction)
 
@@ -491,6 +508,10 @@ func _event_seat(event: InputEvent) -> int:
 
 
 func _handle_claim(role_index: int, seat: int) -> void:
+	if _roles_are_locked_for_selected():
+		GameAudio.play_waypoint_denied()
+		_claim_hint.text = "正式关岗位已在第 1 关锁定，不能更换"
+		return
 	var current_owner := _role_claims[role_index]
 	if current_owner == seat:
 		_role_claims[role_index] = SEAT_NONE
@@ -536,16 +557,15 @@ func _refresh_claim_ui() -> void:
 			status.text = "✓ 已由%s认领" % _seat_name(seat)
 			status.add_theme_color_override("font_color",_seat_color(seat))
 	var roles_ready := not _role_claims.has(SEAT_NONE)
-	var keyboards_ready := not Game.experiment_mode or RawMice.connected_keyboard_count()>=2
-	var ready := roles_ready and keyboards_ready
+	var ready := roles_ready
 	_start_button.disabled = not ready
-	_start_button.text = "开始任务" if ready else ("等待两把键盘" if roles_ready else "等待双方认领")
+	_start_button.text = "开始任务" if ready else "等待双方认领"
 	if ready:
-		_claim_hint.text = "屏幕 A（内置键盘）→ %s ｜ 屏幕 B（外接键盘）→ %s" % [_seat_role_name(SEAT_A),_seat_role_name(SEAT_B)]
+		_claim_hint.text = "%s屏幕 A（内置键盘）→ %s ｜ 屏幕 B（外接键盘）→ %s" % [
+			"岗位锁定：" if _roles_are_locked_for_selected() else "",
+			_seat_role_name(SEAT_A),_seat_role_name(SEAT_B)
+		]
 		_claim_hint.add_theme_color_override("font_color",UI.TEXT)
-	elif roles_ready and not keyboards_ready:
-		_claim_hint.text = "实验模式需要：屏幕 A 的 Mac 内置键盘 + 屏幕 B 的一把外接键盘（当前 %d / 2）" % RawMice.connected_keyboard_count()
-		_claim_hint.add_theme_color_override("font_color",UI.DANGER)
 	else:
 		_claim_hint.add_theme_color_override("font_color",UI.MUTED)
 
@@ -588,10 +608,10 @@ func _close_confirm() -> void:
 func _launch() -> void:
 	if _selected == null or not Game.can_play_mission(_selected.id) or _role_claims.has(SEAT_NONE):
 		return
-	if Game.experiment_mode and RawMice.connected_keyboard_count()<2:
-		return
 	# 认领结果决定屏幕分配：领航员被屏幕 A 认领 → 主屏显示领航员画面，反之显示驾驶员。
 	var primary_role: int = Displays.Role.NAVIGATOR if _role_claims[0] == SEAT_A else Displays.Role.PILOT
+	if Game.experiment_mode and _selected.id != "practice" and not Game.formal_roles_locked:
+		Game.lock_formal_roles(primary_role)
 	Displays.set_primary_role(primary_role)
 	Game.select_mission(_selected.id)
 	ExperimentLog.log_event("mission_selected","system",{
@@ -600,3 +620,7 @@ func _launch() -> void:
 		"screen_b_role":_seat_role_name(SEAT_B),
 	})
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+func _roles_are_locked_for_selected() -> bool:
+	return Game.experiment_mode and _selected != null and _selected.id != "practice" and Game.formal_roles_locked

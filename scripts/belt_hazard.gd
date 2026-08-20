@@ -2,8 +2,8 @@ class_name BeltHazard
 extends RefCounted
 ## 小行星带的连续危险几何。随机岩块负责可见碰撞，这一层负责保证不存在“从缝里直穿”。
 
-## 船体进入带宽的外层 58% 以内属于稀疏擦伤区；更深处是不可穿越的致密核心。
-const CORE_FRACTION: float = 0.58
+## 外缘只造成可恢复的擦伤；船体深入带宽约 82% 才视为明确试图穿越致密核心。
+const CORE_FRACTION: float = 0.82
 const SWEEP_STEP: float = 0.65
 
 enum Exposure {

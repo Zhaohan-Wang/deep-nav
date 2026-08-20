@@ -3,12 +3,11 @@ extends RigidBody3D
 ## 飞船：刚体物理撞场景（对齐 dyadic-force 的球），冲击用速度突变判定扣血。
 
 const BeltHazardGeometry = preload("res://scripts/belt_hazard.gd")
+const TurningModel = preload("res://scripts/ship_turning_model.gd")
 
 const THRUST_ACCEL: float = 14.0
 const REVERSE_ACCEL: float = 8.0
-const TURN_ACCEL: float = 2.55
-const ANGULAR_DAMP_RATE: float = 0.30
-const MAX_YAW_RATE: float = 1.45
+const MAX_YAW_RATE: float = TurningModel.MAX_YAW_RATE
 ## 低于此速度突变视为轻蹭，不扣血。
 const IMPACT_THRESHOLD: float = 3.2
 ## 达到此冲击大约扣 20 船体。
@@ -22,13 +21,15 @@ const BOUNDARY_WARN_FACTOR: float = 0.86
 const BOUNDARY_REPEL_FACTOR: float = 0.91
 const BOUNDARY_REPEL_ACCEL: float = 38.0
 const BOUNDARY_EDGE_DRAG: float = 2.8
-## 稀疏外缘是可恢复的擦伤，不让一次偶然蹭边直接结束实验。
+## 稀疏外缘是可恢复的擦伤：持续危险和实体碎石撞击都约为原伤害的三分之一。
 const BELT_GRAZE_TICK: float = 0.42
-const BELT_GRAZE_DAMAGE_MIN: float = 3.0
-const BELT_GRAZE_DAMAGE_MAX: float = 7.0
+const BELT_GRAZE_DAMAGE_MIN: float = 1.0
+const BELT_GRAZE_DAMAGE_MAX: float = 2.33
+const ASTEROID_EDGE_IMPACT_SCALE: float = 0.333
 
 const GROUP_PLANET: String = "planet_body"
 const GROUP_ASTEROID: String = "asteroid"
+const GROUP_WORLD_BOUNDARY: String = "world_boundary"
 
 @onready var pilot_mount: Marker3D = $PilotMount
 @onready var hull_sprite: Sprite3D = $HullSprite
@@ -97,9 +98,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	var turn: float = Displays.pilot_turn_axis()
-	angular_yaw += turn * TURN_ACCEL * delta
-	angular_yaw *= 1.0 - ANGULAR_DAMP_RATE * delta
-	angular_yaw = clampf(angular_yaw, -MAX_YAW_RATE, MAX_YAW_RATE)
+	angular_yaw = TurningModel.step_yaw_rate(angular_yaw, turn, delta)
 	angular_velocity = Vector3(0.0, angular_yaw, 0.0)
 
 	var thrust_axis: float = Displays.pilot_thrust_axis()
@@ -128,7 +127,11 @@ func _detect_impact() -> void:
 	var impact: float = (_prev_velocity - linear_velocity).length()
 	if impact < IMPACT_THRESHOLD:
 		return
-	_apply_impact_damage(impact)
+	var edge_asteroid_contact := (
+		_is_touching_group(GROUP_ASTEROID)
+		and not _is_touching_group(GROUP_WORLD_BOUNDARY)
+	)
+	_apply_impact_damage(impact, ASTEROID_EDGE_IMPACT_SCALE if edge_asteroid_contact else 1.0)
 
 
 ## 实验扰动使用一次性横向冲量，保留刚体碰撞和驾驶员后续修正的真实轨迹。
@@ -147,10 +150,10 @@ func _is_touching_group(group_name: String) -> bool:
 	return false
 
 
-func _apply_impact_damage(strength: float) -> void:
+func _apply_impact_damage(strength: float, damage_scale: float = 1.0) -> void:
 	if _i_frames > 0.0 or not Game.ship_alive:
 		return
-	var amount: float = _damage_from_impact(strength)
+	var amount: float = _damage_from_impact(strength) * maxf(damage_scale, 0.0)
 	_i_frames = I_FRAME_DURATION
 	Game.apply_hull_damage(amount)
 

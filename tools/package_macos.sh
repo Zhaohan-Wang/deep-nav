@@ -6,8 +6,6 @@ DIST_ROOT="${1:-$PROJECT_ROOT/../deep-nav-dist}"
 APP="$DIST_ROOT/DeepNav.app"
 ZIP="$DIST_ROOT/DeepNav-macOS.zip"
 HELPERS="$APP/Contents/Helpers"
-ENTITLEMENTS="$(mktemp /private/tmp/deepnav-audio-entitlements.XXXXXX)"
-trap 'rm -f "$ENTITLEMENTS"' EXIT
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
 	print -u2 "DeepNav macOS packaging must run on macOS."
@@ -15,7 +13,6 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 "$PROJECT_ROOT/tools/build_macos_hid_bridge.sh"
-"$PROJECT_ROOT/tools/build_macos_audio_recorder.sh"
 
 mkdir -p "$DIST_ROOT"
 rm -rf "$APP"
@@ -27,23 +24,7 @@ rm -f "$ZIP"
 
 mkdir -p "$HELPERS"
 cp "$PROJECT_ROOT/native/macos/bin/deepnav-hid-mouse-bridge" "$HELPERS/"
-ditto \
-	"$PROJECT_ROOT/native/macos/bin/DeepNavAudioRecorder.app" \
-	"$HELPERS/DeepNavAudioRecorder.app"
-chmod +x \
-	"$HELPERS/deepnav-hid-mouse-bridge" \
-	"$HELPERS/DeepNavAudioRecorder.app/Contents/MacOS/deepnav-audio-recorder"
-
-cat > "$ENTITLEMENTS" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>com.apple.security.device.audio-input</key>
-	<true/>
-</dict>
-</plist>
-PLIST
+chmod +x "$HELPERS/deepnav-hid-mouse-bridge"
 
 # 必须用稳定的开发者证书签名。临时签名（-）每次打包都会改变签名指纹，
 # macOS 会把新包当成陌生应用、作废已授予的「输入监控」权限，导致双鼠标
@@ -60,7 +41,6 @@ xattr -cr "$APP"
 codesign --force --sign "$SIGN_IDENTITY" \
 	--identifier "com.zhaohanwang.deepnav.hid-mouse-bridge" \
 	"$HELPERS/deepnav-hid-mouse-bridge"
-codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements "$ENTITLEMENTS" "$HELPERS/DeepNavAudioRecorder.app"
 codesign --force --sign "$SIGN_IDENTITY" --preserve-metadata=identifier,entitlements,flags "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 codesign -dv --verbose=4 "$APP"
@@ -74,7 +54,6 @@ DeepNav 打包版实验记录：
 
 首次使用实验模式时，macOS 会分别请求：
 1. 输入监控权限（区分两只实体鼠标）
-2. 麦克风权限（录制实验原始音频）
 
 DeepNav 1.1.0 首次打开还会在应用内重新确认：
 1. 是否启用游戏声音以及音量
