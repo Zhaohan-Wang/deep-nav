@@ -29,6 +29,10 @@ func _run() -> void:
 	game.set("fullscreen_dual_display", false)
 	game.set("experiment_mode", false)
 	game.set("debug_mode", false)
+	# 性能容量测试不能受现场显示器刷新率限制。正式运行仍使用系统垂直同步；这里只关闭
+	# VSync，验证渲染本身是否具备 120 FPS 余量，否则 100 Hz 显示器会把所有关卡
+	# 稳定锁在 100 FPS，并让 115 FPS 门槛变成不可能通过的假失败。
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	root.size = Vector2i(1920, 1080)
 	var failures: Array[String] = []
 

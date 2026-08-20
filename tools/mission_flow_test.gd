@@ -10,11 +10,28 @@ func _run() -> void:
 	await _check_end_ui_layout()
 	_check_causal_explanation_copy()
 	_check_waypoint_drift_randomization()
+	await _check_target_record_precedes_capture_wait()
 	_check_relay_respawn_policy()
 	await _check_timed_respawn_flow()
 	_check_heading_event_counter()
 	print("MISSION_FLOW_OK per_mission=shared100_then_confidence_then_state6 trust_order=participant_stable cards_inside=960x540 death_respawns=true timeout_only_failure=true relay_stations=visible")
 	quit(0)
+
+
+func _check_target_record_precedes_capture_wait() -> void:
+	var game := root.get_node("Game")
+	game.call("select_mission","level_3")
+	var tracker: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(tracker)
+	for i: int in range(3): await process_frame
+	# 不等待截图协程：记录必须在调用返回到首个 await 时就已经可用于安全门或解体结算。
+	tracker.call("_on_disturbance_effect_applied","waypoint_drift",{"angle_degrees":28.0})
+	var record := tracker.get("_target_event_record") as Dictionary
+	assert(not record.is_empty(),"target record was initialized after the screenshot await")
+	assert(str(record.get("event_type",""))=="waypoint_drift","target record stored the wrong event type")
+	assert(str(record.get("event_id",""))==str((record.get("details",{}) as Dictionary).get("event_id","")),"target record details lost the event id")
+	tracker.queue_free()
+	await process_frame
 
 
 func _check_end_ui_layout() -> void:

@@ -1142,31 +1142,11 @@ func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
 			"message_id":"%s_%s_v1" % [effect,Game.attribution_condition],"message_version":"1",
 			"message_displayed":true,"displayed_to_participants":[Game.participant_id_for_role("navigator"),Game.participant_id_for_role("pilot")],
 		})
-	if effect == "waypoint_drift":
-		_waypoint_drift_events += 1
-		_append_target_event_position(Game.ship_position)
-		details["pulse_index"] = _waypoint_drift_events
-		details["event_id"] = event_id
-		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
-		# 航点偏移在新航点出现的瞬间达到最大值；截图同时保留已显示的系统提示。
-		var review_payload := payload.duplicate()
-		review_payload["pulse_index"] = _waypoint_drift_events
-		review_payload["event_id"] = event_id
-		await _capture_target_event_review(effect,review_payload)
-	elif effect == "ship_shear":
-		_ship_shear_events += 1
-		_append_target_event_position(Game.ship_position)
-		details["pulse_index"] = _ship_shear_events
-		details["event_id"] = event_id
-		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
-		# 横向漂移要观察一小段时间，按实际横向位移挑选峰值帧；原因提示无需等截图。
-		var review_payload := payload.duplicate()
-		review_payload["pulse_index"] = _ship_shear_events
-		review_payload["event_id"] = event_id
-		_capture_target_event_review(effect,review_payload)
-	else:
-		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+	# 目标事件记录必须先于任何截图等待建立。第三关截图会等待下一帧；如果这一帧内
+	# 恰好跨过安全门或飞船解体，结算回调仍应拿到完整的事件起点数据。
 	if effect in ["waypoint_drift","ship_shear"]:
+		details["pulse_index"] = pulse_index
+		details["event_id"] = event_id
 		_target_event_elapsed_s = 0.0
 		_target_event_written = false
 		_target_event_record = {
@@ -1179,6 +1159,26 @@ func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
 			"obstacle_distance_at_event":_nearest_body_surface_gap(),"details":details,
 			"hits_at_onset":_mission_hits,"hull_at_onset":Game.hull,
 		}
+	if effect == "waypoint_drift":
+		_waypoint_drift_events += 1
+		_append_target_event_position(Game.ship_position)
+		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+		# 航点偏移在新航点出现的瞬间达到最大值；截图同时保留已显示的系统提示。
+		var review_payload := payload.duplicate()
+		review_payload["pulse_index"] = _waypoint_drift_events
+		review_payload["event_id"] = event_id
+		await _capture_target_event_review(effect,review_payload)
+	elif effect == "ship_shear":
+		_ship_shear_events += 1
+		_append_target_event_position(Game.ship_position)
+		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
+		# 横向漂移要观察一小段时间，按实际横向位移挑选峰值帧；原因提示无需等截图。
+		var review_payload := payload.duplicate()
+		review_payload["pulse_index"] = _ship_shear_events
+		review_payload["event_id"] = event_id
+		_capture_target_event_review(effect,review_payload)
+	else:
+		ExperimentLog.log_event("disturbance_effect_applied","system",{"effect":effect,"details":details})
 
 
 func _append_target_event_position(world_position: Vector3) -> void:
