@@ -3,6 +3,7 @@ extends Node
 
 const SurveyPanelScript = preload("res://scripts/ui/survey_panel.gd")
 const MissionResultPanelScript = preload("res://scripts/ui/mission_result_panel.gd")
+const PauseMenuScript = preload("res://scripts/ui/pause_menu.gd")
 
 const VIEW_SIZE := Vector2i(640, 360)
 const VIEW_FOV: float = 64.0
@@ -34,6 +35,8 @@ const DEATH_CURVE: Array[Vector2] = [
 ]
 ## 纯白保持期间把船传回出生点（玩家看不到瞬移）。
 const DEATH_RESET_TIME: float = 0.58
+const HID_KEY_ESCAPE: int = 0x29
+const PAUSE_TOGGLE_DEBOUNCE_MS: int = 180
 
 var _world: Node3D
 var _ship: Ship
@@ -49,9 +52,6 @@ var _split: HBoxContainer
 var _bezel: ColorRect
 var _extra_window: Window
 var _root_ui: Control
-var _sfx_confirm: AudioStreamPlayer
-var _sfx_denied: AudioStreamPlayer
-var _sfx_complete: AudioStreamPlayer
 var _shake: CameraShake = CameraShake.new()
 var _restarting: bool = false
 var _nav_view_mat: ShaderMaterial
@@ -81,11 +81,14 @@ var _mission_ended: bool = false
 var _mission_outcome: String = ""
 var _survey_answers: Dictionary = {}
 var _result_panels: Array[Control] = []
+var _pause_menus: Array[Control] = []
+var _last_pause_toggle_ms: int = -1000
+var _pause_scene_transitioning: bool = false
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_bind_inputs()
-	_build_audio()
 	_build_ui()
 	_build_world_and_cameras()
 	Game.waypoint_changed.connect(_on_waypoint_sfx)
@@ -100,13 +103,37 @@ func _ready() -> void:
 	Game.safe_gate_crossed.connect(_on_safe_gate_crossed)
 	Game.relay_station_reached.connect(_on_relay_station_reached)
 	Displays.roles_swapped.connect(_on_display_roles_swapped)
+	Displays.shared_key_input.connect(_on_shared_key_input)
+	RawMice.key_changed.connect(_on_raw_keyboard_key)
 	# 双屏贯穿整个应用；单显示器环境也保留两个并排窗口用于开发预览。
 	Game.set_view_mode(Game.ViewMode.DUAL_WINDOW)
+	if Game.current_sector != null:
+		GameAudio.start_mission_audio(Game.current_sector.id)
+
+
+func _exit_tree() -> void:
+	GameAudio.stop_ship_motion(true)
+	GameAudio.stop_mission_audio(true)
+	if get_tree() != null and get_tree().paused:
+		get_tree().paused = false
 
 
 func _process(delta: float) -> void:
 	if _ship == null or _nav_camera == null or _pilot_camera == null:
 		return
+	if get_tree().paused:
+		return
+	var ship_audio_active := (
+		Game.ship_alive and not _restarting and not _mission_finishing and not _mission_ended
+	)
+	GameAudio.update_ship_motion(
+		Displays.pilot_thrust_axis(),
+		Displays.pilot_turn_axis(),
+		_ship.linear_velocity.length(),
+		ship_audio_active,
+		delta
+	)
+	GameAudio.update_ambient_proximity(_nearest_body_surface_gap(), delta)
 	var shake: Vector3 = _shake.tick(delta) if Game.screen_shake_enabled else Vector3.ZERO
 	_hurt_flash = move_toward(_hurt_flash, 0.0, delta * 2.4)
 	# 受击红光带一点频闪，比匀速淡出更像灯光故障。
@@ -131,10 +158,18 @@ func _process(delta: float) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	if get_tree().paused:
+		return
 	ExperimentLog.sample_frame()
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		_toggle_pause()
+		get_viewport().set_input_as_handled()
+		return
+	if get_tree().paused:
+		return
 	if event.is_action_pressed("cycle_view"):
 		Game.cycle_view_mode()
 		get_viewport().set_input_as_handled()
@@ -150,6 +185,96 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("swap_mouse_seats"):
 		RawMice.swap_mouse_seats()
 		get_viewport().set_input_as_handled()
+
+
+func _on_shared_key_input(event: InputEventKey) -> void:
+	if event.pressed and not event.echo and (
+		event.physical_keycode == KEY_ESCAPE or event.keycode == KEY_ESCAPE
+	):
+		_toggle_pause()
+
+
+func _on_raw_keyboard_key(_seat: int, usage: int, pressed: bool) -> void:
+	if pressed and usage == HID_KEY_ESCAPE:
+		_toggle_pause()
+
+
+func _toggle_pause() -> void:
+	var now := Time.get_ticks_msec()
+	if now - _last_pause_toggle_ms < PAUSE_TOGGLE_DEBOUNCE_MS:
+		return
+	if not get_tree().paused and (_restarting or _mission_finishing or _mission_ended):
+		return
+	_last_pause_toggle_ms = now
+	_set_pause_state(not get_tree().paused)
+
+
+func _set_pause_state(paused: bool) -> void:
+	for menu: Control in _pause_menus:
+		if menu != null:
+			menu.visible = paused
+	if paused:
+		GameAudio.stop_ship_motion(true)
+	GameAudio.set_gameplay_paused(paused)
+	if paused:
+		GameAudio.play_ui_popup_open()
+	else:
+		GameAudio.play_ui_popup_close()
+	get_tree().paused = paused
+	ExperimentLog.log_event("pause_toggled", "system", {
+		"paused": paused,
+		"elapsed": _mission_elapsed,
+	})
+
+
+func _resume_from_pause() -> void:
+	_set_pause_state(false)
+
+
+func _restart_current_mission() -> void:
+	if not _prepare_pause_scene_transition():
+		return
+	ExperimentLog.log_event("pause_action", "system", {
+		"action": "restart_mission",
+		"elapsed": _mission_elapsed,
+	})
+	Game.reset_run()
+	get_tree().reload_current_scene()
+
+
+func _return_to_level_select() -> void:
+	if not _prepare_pause_scene_transition():
+		return
+	ExperimentLog.log_event("pause_action", "system", {
+		"action": "return_level_select",
+		"elapsed": _mission_elapsed,
+	})
+	Game.reset_run()
+	get_tree().change_scene_to_file("res://scenes/level_select.tscn")
+
+
+func _return_to_title() -> void:
+	if not _prepare_pause_scene_transition():
+		return
+	ExperimentLog.log_event("pause_action", "system", {
+		"action": "return_title",
+		"elapsed": _mission_elapsed,
+	})
+	ExperimentLog.close_session()
+	Game.clear_experiment_setup()
+	Game.reset_run()
+	get_tree().change_scene_to_file("res://scenes/title_screen.tscn")
+
+
+func _prepare_pause_scene_transition() -> bool:
+	# 任一屏幕发起退出都只执行一次；先收回副屏角色页，再让下一场景重新镜像到两块屏幕。
+	if _pause_scene_transitioning:
+		return false
+	_pause_scene_transitioning = true
+	_set_pause_state(false)
+	Game.set_view_mode(Game.ViewMode.SPLIT)
+	Displays.show_shared_page()
+	return true
 
 
 func _bind_inputs() -> void:
@@ -173,20 +298,6 @@ func _bind_key(action: String, key: Key) -> void:
 	var ev := InputEventKey.new()
 	ev.physical_keycode = key
 	InputMap.action_add_event(action, ev)
-
-
-func _build_audio() -> void:
-	_sfx_confirm = _make_player("res://assets/audio/ui/Confirm_01.ogg")
-	_sfx_denied = _make_player("res://assets/audio/ui/Denied_02.ogg")
-	_sfx_complete = _make_player("res://assets/audio/ui/Complete_01.ogg")
-
-
-func _make_player(path: String) -> AudioStreamPlayer:
-	var player := AudioStreamPlayer.new()
-	player.stream = load(path) as AudioStream
-	player.bus = "Master"
-	add_child(player)
-	return player
 
 
 func _build_ui() -> void:
@@ -218,6 +329,22 @@ func _build_ui() -> void:
 	# 白屏只叠在两块游戏页上，letterbox / 中缝保持原色。
 	_death_overlays.append(_attach_screen_white(_navigator_view))
 	_death_overlays.append(_attach_screen_white(_pilot_view))
+	_build_pause_menus()
+
+
+func _build_pause_menus() -> void:
+	for entry: Dictionary in [
+		{"role": "navigator", "page": _navigator_view},
+		{"role": "pilot", "page": _pilot_view},
+	]:
+		var menu := PauseMenuScript.new() as Control
+		(entry.page as Control).add_child(menu)
+		menu.call("setup", str(entry.role))
+		menu.connect("resume_requested", _resume_from_pause)
+		menu.connect("restart_requested", _restart_current_mission)
+		menu.connect("level_select_requested", _return_to_level_select)
+		menu.connect("title_requested", _return_to_title)
+		_pause_menus.append(menu)
 
 
 func _build_world_and_cameras() -> void:
@@ -466,6 +593,19 @@ func _proximity_factor() -> float:
 	return worst
 
 
+func _nearest_body_surface_gap() -> float:
+	var nearest := INF
+	for body: CelestialBodyData in Game.celestial_bodies:
+		var to := Vector3(
+			body.world_position.x - Game.ship_position.x,
+			0.0,
+			body.world_position.z - Game.ship_position.z
+		)
+		var gap := to.length() - body.collision_radius - Game.SHIP_RADIUS
+		nearest = minf(nearest, gap)
+	return nearest if nearest < INF else 1000.0
+
+
 ## 解体白屏：按关键帧曲线推进——闪两下、拉到纯白、保持、淡出。
 func _update_death_flash(delta: float) -> void:
 	if _death_time < 0.0:
@@ -511,6 +651,7 @@ func _apply_death_white(value: float) -> void:
 
 func _on_ship_hit(remaining: float) -> void:
 	_mission_hits += 1
+	GameAudio.play_ship_impact(remaining / Game.MAX_HULL)
 	ExperimentLog.log_event("ship_hit","pilot",{
 		"hit_index":_mission_hits,"remaining_hull":remaining,
 		"x":Game.ship_position.x,"z":Game.ship_position.z,
@@ -574,7 +715,7 @@ func _prime_explosion_visual(world_pos: Vector3) -> void:
 	_shake.add(1.35)
 	_hurt_flash = 1.0
 	_light_flash = 1.0
-	_sfx_denied.play()
+	GameAudio.play_explosion()
 	if _world != null:
 		ShipBurst3D.play(_world,world_pos)
 
@@ -678,13 +819,14 @@ func _reset_run(clear_death_white: bool = true) -> void:
 
 func _on_waypoint_sfx(_pos: Vector3, enabled: bool) -> void:
 	if enabled:
-		_sfx_confirm.play()
+		GameAudio.play_waypoint_placed()
 
 
 func _on_waypoint_request_result(accepted: bool, reason: String, remaining_s: float) -> void:
 	if accepted:
 		_mission_waypoints += 1
-	if not accepted: _sfx_denied.play()
+	if not accepted:
+		GameAudio.play_waypoint_denied()
 	ExperimentLog.log_event("waypoint_request","navigator",{
 		"request_sequence":Game.waypoint_request_sequence,
 		"requested_x":Game.last_waypoint_requested.x,
@@ -729,6 +871,7 @@ func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
 			message = "系统说明：太阳风影响减弱，进入恢复窗口" if explicit else "系统提示：航行状态进入恢复窗口"
 	if message.is_empty():
 		return
+	GameAudio.play_system_alert()
 	if _navigator_view != null:
 		_navigator_view.show_experiment_notice(message)
 	if _pilot_view != null:
@@ -742,13 +885,14 @@ func _on_safe_gate_crossed(index: int,anchor: Vector3) -> void:
 
 
 func _on_relay_station_reached(index: int,position: Vector3,station_name: String) -> void:
+	GameAudio.play_relay_reached()
 	ExperimentLog.log_event("relay_station_reached","system",{
 		"index":index,"name":station_name,"x":position.x,"z":position.z
 	})
 
 
 func _on_complete_sfx() -> void:
-	_sfx_complete.play()
+	GameAudio.play_mission_complete()
 
 
 func _on_mission_success() -> void:
@@ -759,6 +903,8 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	if _mission_ended or _mission_finishing:
 		return
 	_mission_finishing = true
+	GameAudio.stop_ship_motion()
+	GameAudio.finish_mission_audio()
 	_mission_outcome = outcome
 	Engine.time_scale = 1.0
 	if not success:
@@ -781,6 +927,7 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 
 func _show_result_flow(outcome: String,success: bool,summary: Dictionary) -> void:
 	_result_panels.clear()
+	GameAudio.play_ui_popup_open()
 	for entry: Dictionary in [
 		{"role":"navigator","parent":_navigator_view},
 		{"role":"pilot","parent":_pilot_view},
@@ -791,6 +938,7 @@ func _show_result_flow(outcome: String,success: bool,summary: Dictionary) -> voi
 		panel.show_result(outcome,success)
 		_result_panels.append(panel)
 	await get_tree().create_timer(1.65,true,false,true).timeout
+	GameAudio.play_ui_page_turn()
 	for panel: Control in _result_panels:
 		if is_instance_valid(panel):
 			panel.show_summary(summary)
@@ -803,6 +951,7 @@ func _show_result_flow(outcome: String,success: bool,summary: Dictionary) -> voi
 
 
 func _show_surveys(outcome: String,summary: Dictionary) -> void:
+	GameAudio.play_ui_popup_open()
 	var nav: Control = SurveyPanelScript.new(); _navigator_view.add_child(nav); nav.setup("navigator",outcome,summary); nav.submitted.connect(_on_survey_submitted)
 	var pilot: Control = SurveyPanelScript.new(); _pilot_view.add_child(pilot); pilot.setup("pilot",outcome,summary); pilot.submitted.connect(_on_survey_submitted)
 

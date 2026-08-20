@@ -9,6 +9,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var game := root.get_node("/root/Game")
 	var catalog = load("res://scripts/mission_catalog.gd")
+	game.set("experiment_mode",true)
 	game.begin_mission_sequence()
 	assert(game.active_mission_id() == "practice","new sequence must start at practice")
 	assert(game.can_play_mission("practice"),"practice must be the only initial playable mission")
@@ -36,7 +37,20 @@ func _run() -> void:
 	game.begin_mission_sequence()
 	assert(game.active_mission_id() == "practice","new sequence must clear temporary progress")
 	assert(game.session_mission_results.is_empty(),"temporary results must reset with a new sequence")
-	print("SESSION_PROGRESS_OK missions=%d sequential=true memory_only=true" % catalog.IDS.size())
+	game.set("experiment_mode",false)
+	assert(game.unlock_all_missions(),"preview mode must open every mission")
+	assert(game.can_play_mission("level_4"),"turning experiment mode off must make every catalog mission playable")
+	var free_page := (load("res://scenes/level_select.tscn") as PackedScene).instantiate()
+	root.add_child(free_page)
+	await process_frame
+	await process_frame
+	var free_cards: Array = free_page.get("_cards")
+	for card: Variant in free_cards:
+		assert(not (card as Button).disabled,"preview mode must keep all mission cards enabled")
+	assert(not (free_page.get("_launch_button") as Button).disabled,"preview mode must keep launch available")
+	free_page.queue_free()
+	await process_frame
+	print("SESSION_PROGRESS_OK missions=%d sequential=experiment free_play=preview" % catalog.IDS.size())
 	quit(0)
 
 

@@ -24,6 +24,8 @@ static func classify(fraction: float) -> Exposure:
 static func penetration_fraction(point: Vector3,belt: BeltData,hull_radius: float) -> float:
 	if belt == null or belt.is_boundary:
 		return 0.0
+	if belt.shape == BeltData.Shape.SPLINE and not _inside_spline_broadphase(point,belt,hull_radius):
+		return 0.0
 	var profile := _cross_section(point,belt)
 	var half_width: float = float(profile["half_width"])
 	var distance: float = float(profile["distance"])
@@ -82,6 +84,34 @@ static func _cross_section(point: Vector3,belt: BeltData) -> Dictionary:
 		"distance":planar_point.distance_to(belt.from_point+delta*t),
 		"half_width":belt.half_width,
 	}
+
+
+static func _inside_spline_broadphase(point: Vector3,belt: BeltData,hull_radius: float) -> bool:
+	# 大多数物理帧飞船离样条带很远；先用保守 AABB 排除，避免每条带都做 91 次样条求值。
+	if belt.control_points.size() < 2:
+		return true
+	var min_x := INF
+	var max_x := -INF
+	var min_z := INF
+	var max_z := -INF
+	var max_spacing := 0.0
+	for i: int in range(belt.control_points.size()):
+		var control := belt.control_points[i]
+		min_x = minf(min_x,control.x)
+		max_x = maxf(max_x,control.x)
+		min_z = minf(min_z,control.z)
+		max_z = maxf(max_z,control.z)
+		if i > 0:
+			max_spacing = maxf(max_spacing,control.distance_to(belt.control_points[i-1]))
+	var max_width := belt.half_width
+	for width: float in belt.width_profile:
+		max_width = maxf(max_width,width)
+	# Catmull-Rom 曲线可能越出控制点包围盒；额外加入 30% 最大点距，保持判定保守。
+	var margin := max_width + belt.spline_wobble + maxf(hull_radius,0.0) + max_spacing * 0.30 + 1.0
+	return (
+		point.x >= min_x-margin and point.x <= max_x+margin
+		and point.z >= min_z-margin and point.z <= max_z+margin
+	)
 
 
 static func _nearest_spline_t(point: Vector3,belt: BeltData) -> float:

@@ -10,6 +10,8 @@ input_probe_tmp.gd.uid
 
 # 实机调试截图体积大、且含大量光标对齐探针；README 用图在 docs/readme/
 artifacts/runtime/
+# 从原视频无损分离的完整 AAC 存档仅供本机试听；运行时使用 assets/audio 下的裁切 OGG。
+artifacts/audio_extracted/
 
 .DS_Store
 **/.DS_Store

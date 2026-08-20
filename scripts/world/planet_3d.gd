@@ -27,7 +27,9 @@ func setup(body: CelestialBodyData) -> void:
 	_viewport.transparent_bg = true
 	_viewport.disable_3d = true
 	_viewport.handle_input_locally = false
-	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# 3D 行星表面本身就冻住（override_time），近大远小只改广告牌缩放。
+	# 视口每帧重绘的是同一张静帧；改成生成一次不影响观感，黑洞关能省掉最大那块 offscreen。
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_viewport.gui_disable_input = true
 	_viewport.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
 	add_child(_viewport)
@@ -82,6 +84,8 @@ func apply_star_light(star_pos: Vector3) -> void:
 		return
 	var light_uv: Vector2 = PlanetFactory.light_uv_from_star(global_position, star_pos)
 	_planet.call("set_light", light_uv)
+	# setup 后同一帧会设置恒星方向，确保最终光照状态至少渲染一帧。
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
 func _build_collision(body: CelestialBodyData) -> void:

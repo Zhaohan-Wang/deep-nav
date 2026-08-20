@@ -4,6 +4,10 @@ extends Node3D
 
 const Layout = preload("res://scripts/belt_layout.gd")
 const COLLISION_LAYER: int = 8
+## 两台相机会把世界各画一遍；远到只剩亚像素的碎石再淡出，避免近处密度突然变空。
+const FLIGHT_ROCK_VISIBILITY_RANGE: float = 520.0
+const DECORATIVE_ROCK_VISIBILITY_RANGE: float = 460.0
+const ROCK_VISIBILITY_MARGIN: float = 90.0
 
 
 var _light_dir: Vector3 = Vector3(0.42, 0.62, 0.48)
@@ -169,6 +173,11 @@ func _spawn_rock(pos: Vector3, radius: float, rng: RandomNumberGenerator, damage
 		rng.randf_range(0.0, TAU)
 	)
 	visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	visual.visibility_range_end = FLIGHT_ROCK_VISIBILITY_RANGE if hits_flight else DECORATIVE_ROCK_VISIBILITY_RANGE
+	visual.visibility_range_end_margin = ROCK_VISIBILITY_MARGIN
+	# 体积层只负责远景密度，不需要每颗都运行脚本；飞行层岩块保留慢速翻滚反馈。
+	if not hits_flight:
+		visual.process_mode = Node.PROCESS_MODE_DISABLED
 	visual.set("tumble", Vector3(
 		rng.randf_range(-0.55, 0.55),
 		rng.randf_range(-0.85, 0.85),

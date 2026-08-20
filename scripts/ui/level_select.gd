@@ -27,6 +27,7 @@ var _launch_button: Button
 
 
 func _ready() -> void:
+	Displays.show_shared_page()
 	RawMice.keyboard_device_changed.connect(_on_keyboard_device_changed)
 	add_child(UI.page())
 	var margin := MarginContainer.new()
@@ -62,11 +63,15 @@ func _ready() -> void:
 	_detail.add_theme_constant_override("separation",14)
 	scroll.add_child(_detail)
 	_build_footer(root)
-	var active_id := Game.active_mission_id()
-	if active_id.is_empty():
+	if Game.unlock_all_missions():
+		var open_id := Game.selected_mission_id
+		if open_id.is_empty() or not Catalog.IDS.has(open_id):
+			open_id = Catalog.IDS[0]
+		_select(Catalog.by_id(open_id))
+	elif Game.active_mission_id().is_empty():
 		_show_sequence_complete()
 	else:
-		_select(Catalog.by_id(active_id))
+		_select(Catalog.by_id(Game.active_mission_id()))
 
 
 func _build_header(root: VBoxContainer) -> void:
@@ -88,7 +93,9 @@ func _build_header(root: VBoxContainer) -> void:
 	mode_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	mode.add_child(mode_label)
 	var active_number := mini(Game.session_mission_index + 1,Catalog.IDS.size())
-	var progress_text := "全部任务已结束" if Game.active_mission_id().is_empty() else "当前任务 %02d / %02d" % [active_number,Catalog.IDS.size()]
+	var progress_text := "测试入口 · 全部关卡开放"
+	if not Game.unlock_all_missions():
+		progress_text = "全部任务已结束" if Game.active_mission_id().is_empty() else "当前任务 %02d / %02d" % [active_number,Catalog.IDS.size()]
 	var progress := UI.label(progress_text,16,UI.MUTED)
 	progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	mode.add_child(progress)
@@ -102,13 +109,15 @@ func _build_mission_list(body: HBoxContainer) -> void:
 	list.add_child(UI.label("本次流程",18,UI.AMBER))
 	for mission: SectorData in Catalog.all():
 		var status := Game.mission_session_status(mission.id)
-		var prefix := "✓" if status == "completed" else ("▶" if status == "current" else "◆")
-		var suffix := "已结束" if status == "completed" else ("当前任务" if status == "current" else "尚未开放")
+		var unlocked := Game.unlock_all_missions()
+		var prefix := "✓" if status == "completed" else ("▶" if status == "current" or unlocked else "◆")
+		var suffix := "已结束" if status == "completed" else ("当前任务" if status == "current" else ("测试开放" if unlocked else "尚未开放"))
 		var b := UI.button("%s  %02d   %s     %s" % [prefix,mission.order_index,mission.public_display_name(),suffix],Vector2(420,72))
+		UI.set_button_audio_cue(b,"choice")
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.disabled = status != "current"
-		b.modulate.a = 1.0 if status == "current" else (0.54 if status == "completed" else 0.28)
-		if status == "current":
+		b.disabled = not unlocked and status != "current"
+		b.modulate.a = 1.0 if unlocked or status == "current" else (0.54 if status == "completed" else 0.28)
+		if unlocked or status == "current":
 			b.pressed.connect(_select.bind(mission))
 		list.add_child(b)
 		_cards.append(b)
@@ -119,6 +128,7 @@ func _build_footer(root: VBoxContainer) -> void:
 	footer.add_theme_constant_override("separation",18)
 	root.add_child(footer)
 	var back := UI.button("返回",Vector2(220,66))
+	UI.set_button_audio_cue(back,"page_turn")
 	back.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/title_screen.tscn"))
 	footer.add_child(back)
 	_selection_status = UI.label("",18,UI.MUTED)
@@ -126,13 +136,16 @@ func _build_footer(root: VBoxContainer) -> void:
 	_selection_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	footer.add_child(_selection_status)
 	_launch_button = UI.button("进入准备确认",Vector2(340,66),true)
-	_launch_button.disabled = Game.active_mission_id().is_empty()
+	UI.set_button_audio_cue(_launch_button,"popup_open")
+	_launch_button.disabled = not Game.unlock_all_missions() and Game.active_mission_id().is_empty()
 	_launch_button.text = "流程已完成" if _launch_button.disabled else "进入准备确认"
 	_launch_button.pressed.connect(_open_confirm)
 	footer.add_child(_launch_button)
 
 
 func _mode_text() -> String:
+	if Game.unlock_all_missions():
+		return "◇ 预览模式 · 关卡全开"
 	if Game.experiment_mode:
 		return "● 实验模式 · 正式记录"
 	if Game.researcher_debug_enabled():
@@ -354,6 +367,7 @@ func _open_confirm() -> void:
 	titles.add_child(eyebrow)
 	titles.add_child(UI.label("认领角色 · %02d %s" % [_selected.order_index,_selected.public_display_name()],38,UI.CYAN))
 	var close := UI.button("✕ 关闭",Vector2(170,58))
+	UI.set_button_audio_cue(close,"popup_close")
 	close.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	close.pressed.connect(_close_confirm)
 	header.add_child(close)
@@ -387,6 +401,7 @@ func _open_confirm() -> void:
 	actions.add_theme_constant_override("separation",20)
 	box.add_child(actions)
 	var change := UI.button("更换模式",Vector2(280,66))
+	UI.set_button_audio_cue(change,"page_turn")
 	change.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/title_screen.tscn"))
 	actions.add_child(change)
 	var spacer := Control.new()
@@ -394,6 +409,7 @@ func _open_confirm() -> void:
 	actions.add_child(spacer)
 	_start_button = UI.button("等待双方认领",Vector2(420,66),true)
 	_start_button.disabled = true
+	UI.set_button_audio_cue(_start_button,"confirm")
 	_start_button.pressed.connect(_launch)
 	actions.add_child(_start_button)
 	_refresh_claim_ui()
@@ -405,8 +421,12 @@ func _build_claim_card(role_index: int) -> PanelContainer:
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	card.gui_input.connect(_on_claim_card_input.bind(role_index))
-	card.mouse_entered.connect(_on_claim_card_hover.bind(role_index,true))
-	card.mouse_exited.connect(_on_claim_card_hover.bind(role_index,false))
+	UI.wire_control_hover(
+		card,
+		_on_claim_card_hover.bind(role_index,true),
+		_on_claim_card_hover.bind(role_index,false),
+		true
+	)
 	var pad := MarginContainer.new()
 	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pad.add_theme_constant_override("margin_left",22)
@@ -474,9 +494,11 @@ func _handle_claim(role_index: int, seat: int) -> void:
 	var current_owner := _role_claims[role_index]
 	if current_owner == seat:
 		_role_claims[role_index] = SEAT_NONE
+		GameAudio.play_ui_choice()
 		_claim_hint.text = "%s 已取消认领「%s」" % [_seat_name(seat),ROLE_NAMES[role_index]]
 		ExperimentLog.log_event("role_unclaimed",_seat_actor(seat),{"role":ROLE_NAMES[role_index]})
 	elif current_owner != SEAT_NONE:
+		GameAudio.play_waypoint_denied()
 		_claim_hint.text = "「%s」已由%s认领；如需更换，请由对方点击取消" % [ROLE_NAMES[role_index],_seat_name(current_owner)]
 		_refresh_claim_ui()
 		return
@@ -485,6 +507,7 @@ func _handle_claim(role_index: int, seat: int) -> void:
 			if _role_claims[i] == seat:
 				_role_claims[i] = SEAT_NONE
 		_role_claims[role_index] = seat
+		GameAudio.play_ui_choice()
 		_claim_hint.text = "「%s」已由%s认领" % [ROLE_NAMES[role_index],_seat_name(seat)]
 		ExperimentLog.log_event("role_claimed",_seat_actor(seat),{"role":ROLE_NAMES[role_index]})
 	_refresh_claim_ui()
@@ -553,6 +576,7 @@ func _seat_role_name(seat: int) -> String:
 func _close_confirm() -> void:
 	if _confirm_layer == null:
 		return
+	GameAudio.play_ui_popup_close()
 	_confirm_layer.queue_free()
 	_confirm_layer = null
 	_claim_cards = []

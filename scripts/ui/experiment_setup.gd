@@ -77,11 +77,13 @@ func _ready() -> void:
 	actions.add_theme_constant_override("separation",14)
 	body.add_child(actions)
 	var back := UI.button("返回标题",Vector2(250,66))
+	UI.set_button_audio_cue(back,"page_turn")
 	back.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/title_screen.tscn"))
 	actions.add_child(back)
 	_continue = UI.button("锁定并继续",Vector2(330,66),true)
 	_continue.name = "ContinueButton"
 	_continue.disabled = true
+	UI.set_button_audio_cue(_continue,"confirm")
 	_continue.pressed.connect(_submit)
 	actions.add_child(_continue)
 	_focus_number.call_deferred()

@@ -20,6 +20,7 @@ config/icon="res://assets/app/deep_nav_icon.png"
 [autoload]
 
 Game="*res://scripts/game_state.gd"
+GameAudio="*res://scripts/game_audio.gd"
 AudioRecorder="*res://scripts/audio_recorder.gd"
 ExperimentLog="*res://scripts/experiment_log.gd"
 RawMice="*res://scripts/raw_mouse_input.gd"

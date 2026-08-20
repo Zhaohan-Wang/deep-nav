@@ -26,6 +26,9 @@ var _ping_time: float = 0.0
 var _dest_time: float = 0.0
 ## 标记旋转 / 脉动的公共时钟。
 var _spin: float = 0.0
+## 碎石带几何按关卡烘焙一次；每帧只做世界到屏幕的平移缩放。
+var _belt_cache_sector: String = ""
+var _belt_cache: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -37,7 +40,8 @@ func _process(delta: float) -> void:
 	_ping_time = fmod(_ping_time + delta, PING_PERIOD)
 	_dest_time = fmod(_dest_time + delta, DEST_PING_PERIOD)
 	_spin = fmod(_spin + delta, TAU * 60.0)
-	queue_redraw()
+	if is_visible_in_tree():
+		queue_redraw()
 
 
 func _draw() -> void:
@@ -209,103 +213,136 @@ func _draw_relay_stations(map: SectorMap) -> void:
 
 
 func _draw_belts(map: SectorMap) -> void:
-	if Game.current_sector == null:
-		return
-	for belt: BeltData in Game.current_sector.belts:
-		if belt.shape == BeltData.Shape.RING or belt.is_boundary:
-			_draw_ring_belt(map, belt)
-		elif belt.shape == BeltData.Shape.SPLINE:
-			_draw_spline_belt(map, belt)
-		else:
-			_draw_band_belt(map, belt)
-		_scatter_rocks(map, belt)
-
-
-func _draw_ring_belt(map: SectorMap, belt: BeltData) -> void:
-	var segs: int = 72 if belt.is_boundary else 56
-	var fill: PackedVector2Array = PackedVector2Array()
-	for i: int in range(segs + 1):
-		var a: float = TAU * float(i) / float(segs)
-		fill.append(map.world_to_map(belt.point_on_ring(a,belt.outer_radius)))
-	for i: int in range(segs + 1):
-		var a: float = TAU * float(segs - i) / float(segs)
-		fill.append(map.world_to_map(belt.point_on_ring(a,belt.inner_radius)))
-	if fill.size() >= 3:
-		draw_colored_polygon(fill, BELT_FILL_BOUNDARY if belt.is_boundary else BELT_FILL)
-	var edge: Color = BELT_EDGE_BOUNDARY if belt.is_boundary else BELT_EDGE
-	_draw_dashed_belt_loop(map,belt,belt.outer_radius,segs,edge,1.2)
-	_draw_dashed_belt_loop(map,belt,belt.inner_radius,segs,Color(edge,edge.a*0.8),1.0)
-
-
-func _draw_band_belt(map: SectorMap, belt: BeltData) -> void:
-	var from: Vector2 = map.world_to_map(belt.from_point)
-	var to: Vector2 = map.world_to_map(belt.to_point)
+	_ensure_belt_cache()
 	var scale_px: float = map.pixels_per_unit()
-	var half: float = belt.half_width * scale_px
-	var delta: Vector2 = to - from
-	if delta.length_squared() < 0.001:
-		return
-	var along: Vector2 = delta.normalized()
-	var side := Vector2(-along.y, along.x)
-	var quad: PackedVector2Array = PackedVector2Array([
-		from + side * half,
-		to + side * half,
-		to - side * half,
-		from - side * half,
-	])
-	draw_colored_polygon(quad, BELT_FILL)
-	draw_dashed_line(from + side * half, to + side * half, BELT_EDGE, 1.2, 8.0)
-	draw_dashed_line(from - side * half, to - side * half, BELT_EDGE, 1.2, 8.0)
+	for baked: Dictionary in _belt_cache:
+		var fill_color := baked["fill_color"] as Color
+		var left := baked["left"] as PackedVector2Array
+		var right := baked["right"] as PackedVector2Array
+		if left.size() >= 2 and right.size() == left.size():
+			var screen_left := _map_points(map, left)
+			var screen_right := _map_points(map, right)
+			for i: int in range(screen_left.size() - 1):
+				_fill_spline_triangle(screen_left[i], screen_left[i + 1], screen_right[i], fill_color)
+				_fill_spline_triangle(screen_left[i + 1], screen_right[i + 1], screen_right[i], fill_color)
+		else:
+			var fill := _map_points(map, baked["fill"] as PackedVector2Array)
+			if fill.size() >= 3:
+				draw_colored_polygon(fill, fill_color)
+		var edges := baked["edges"] as Array
+		for edge: Variant in edges:
+			var pair := edge as PackedVector2Array
+			if pair.size() < 2:
+				continue
+			draw_line(_map_point(map, pair[0]), _map_point(map, pair[1]), baked["edge_color"] as Color, float(baked["edge_width"]), true)
+		for rock: Variant in baked["rocks"] as Array:
+			var sample := rock as Dictionary
+			var radius: float = clampf(float(sample["radius"]) * scale_px, 0.8, 2.4)
+			draw_circle(_map_point(map, sample["point"] as Vector2), radius, Color(0.76, 0.65, 0.52, 0.94))
 
 
-func _draw_spline_belt(map: SectorMap, belt: BeltData) -> void:
-	if belt.control_points.size() < 2:
+func _ensure_belt_cache() -> void:
+	if Game.current_sector == null:
+		_belt_cache.clear()
+		_belt_cache_sector = ""
 		return
+	if _belt_cache_sector == Game.current_sector.id:
+		return
+	_belt_cache_sector = Game.current_sector.id
+	_belt_cache.clear()
+	for belt: BeltData in Game.current_sector.belts:
+		_belt_cache.append(_bake_belt(belt))
+
+
+func _bake_belt(belt: BeltData) -> Dictionary:
+	var fill := PackedVector2Array()
 	var left := PackedVector2Array()
 	var right := PackedVector2Array()
-	var segments: int = maxi(24, (belt.control_points.size() - 1) * 16)
-	for i: int in range(segments + 1):
-		var t: float = float(i) / float(segments)
-		var point: Vector3 = belt.spline_point(t)
-		var tangent: Vector3 = belt.spline_tangent(t)
-		var side := Vector3(-tangent.z, 0.0, tangent.x).normalized()
-		var width: float = belt.spline_half_width(t)
-		left.append(map.world_to_map(point + side * width))
-		right.append(map.world_to_map(point - side * width))
-	for i: int in range(segments):
-		# 急弯处四边形也可能翻面；拆成两个带面积检查的三角形，退化片段直接跳过。
-		_fill_spline_triangle(left[i],left[i+1],right[i])
-		_fill_spline_triangle(left[i+1],right[i+1],right[i])
+	var edges: Array[PackedVector2Array] = []
+	if belt.shape == BeltData.Shape.RING or belt.is_boundary:
+		var segs: int = 72 if belt.is_boundary else 56
+		for i: int in range(segs + 1):
+			fill.append(_xz(belt.point_on_ring(TAU * float(i) / float(segs), belt.outer_radius)))
+		for i: int in range(segs + 1):
+			fill.append(_xz(belt.point_on_ring(TAU * float(segs - i) / float(segs), belt.inner_radius)))
+		_append_dashed_loop(edges, belt, belt.outer_radius, segs)
+		_append_dashed_loop(edges, belt, belt.inner_radius, segs)
+	elif belt.shape == BeltData.Shape.SPLINE and belt.control_points.size() >= 2:
+		var segments: int = maxi(24, (belt.control_points.size() - 1) * 16)
+		for i: int in range(segments + 1):
+			var t: float = float(i) / float(segments)
+			var point: Vector3 = belt.spline_point(t)
+			var tangent: Vector3 = belt.spline_tangent(t)
+			var side := Vector3(-tangent.z, 0.0, tangent.x).normalized()
+			var width: float = belt.spline_half_width(t)
+			left.append(_xz(point + side * width))
+			right.append(_xz(point - side * width))
+		for i: int in range(segments):
+			if i % 2 == 0:
+				edges.append(PackedVector2Array([left[i], left[i + 1]]))
+				edges.append(PackedVector2Array([right[i], right[i + 1]]))
+	else:
+		var from := _xz(belt.from_point)
+		var to := _xz(belt.to_point)
+		var delta := to - from
+		if delta.length_squared() >= 0.001:
+			var along := delta.normalized()
+			var side := Vector2(-along.y, along.x) * belt.half_width
+			fill = PackedVector2Array([from + side, to + side, to - side, from - side])
+			edges.append(PackedVector2Array([from + side, to + side]))
+			edges.append(PackedVector2Array([from - side, to - side]))
+	var rocks: Array[Dictionary] = []
+	for sample: Dictionary in Layout.samples(belt):
+		if not bool(sample["hits_flight"]):
+			continue
+		rocks.append({
+			"point": _xz(Vector3(sample["position"])),
+			"radius": float(sample["hit_radius"]),
+		})
+		if rocks.size() >= BELT_ROCK_CAP:
+			break
+	return {
+		"fill": fill,
+		"left": left,
+		"right": right,
+		"fill_color": BELT_FILL_BOUNDARY if belt.is_boundary else BELT_FILL,
+		"edges": edges,
+		"edge_color": BELT_EDGE_BOUNDARY if belt.is_boundary else BELT_EDGE,
+		"edge_width": 1.2,
+		"rocks": rocks,
+	}
+
+
+func _append_dashed_loop(edges: Array[PackedVector2Array], belt: BeltData, radius: float, segs: int) -> void:
+	for i: int in range(segs):
 		if i % 2 == 1:
 			continue
-		draw_line(left[i], left[i + 1], BELT_EDGE, 1.2, true)
-		draw_line(right[i], right[i + 1], BELT_EDGE, 1.2, true)
+		edges.append(PackedVector2Array([
+			_xz(belt.point_on_ring(TAU * float(i) / float(segs), radius)),
+			_xz(belt.point_on_ring(TAU * float(i + 1) / float(segs), radius)),
+		]))
 
 
-func _fill_spline_triangle(a: Vector2,b: Vector2,c: Vector2) -> void:
-	if absf((b-a).cross(c-a))<0.04: return
-	draw_colored_polygon(PackedVector2Array([a,b,c]),BELT_FILL)
+func _xz(world: Vector3) -> Vector2:
+	return Vector2(world.x, world.z)
 
 
-## 用尘带自己的种子在带内撒碎石点，和 3D 生成同一套分布逻辑，
-## 大小明暗随机，看上去就是一片真实的石头而不是斜线网格。
-func _scatter_rocks(map: SectorMap, belt: BeltData) -> void:
-	var drawn := 0
-	for sample: Dictionary in Layout.samples(belt):
-		if not bool(sample["hits_flight"]): continue
-		var p: Vector2 = map.world_to_map(Vector3(sample["position"]))
-		var radius: float = clampf(float(sample["hit_radius"])*map.pixels_per_unit(),0.8,2.4)
-		draw_circle(p,radius,Color(0.76,0.65,0.52,0.94))
-		drawn+=1
-		if drawn>=BELT_ROCK_CAP: break
+func _map_point(map: SectorMap, world_xz: Vector2) -> Vector2:
+	return map.world_to_map(Vector3(world_xz.x, 0.0, world_xz.y))
 
 
-func _draw_dashed_belt_loop(map: SectorMap,belt: BeltData,radius: float,segs: int,color: Color,width: float) -> void:
-	for i: int in range(segs):
-		if i%2==1: continue
-		var p0:=map.world_to_map(belt.point_on_ring(TAU*float(i)/float(segs),radius))
-		var p1:=map.world_to_map(belt.point_on_ring(TAU*float(i+1)/float(segs),radius))
-		draw_line(p0,p1,color,width,true)
+func _map_points(map: SectorMap, worlds: PackedVector2Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	out.resize(worlds.size())
+	for i: int in range(worlds.size()):
+		out[i] = _map_point(map, worlds[i])
+	return out
+
+
+func _fill_spline_triangle(a: Vector2, b: Vector2, c: Vector2, color: Color) -> void:
+	if absf((b - a).cross(c - a)) < 0.04:
+		return
+	draw_colored_polygon(PackedVector2Array([a, b, c]), color)
 
 
 ## 固定在星图上沿的全程进度轨。实验模式只按起点与目的地距离显示公开进度；

@@ -1,5 +1,6 @@
 extends Node
 ## 全局游戏状态：当前扇区、飞船、航点、显示模式。
+## 关卡锁定只在实验模式生效；关掉实验模式后，五关都可以直接进、可重复玩。
 
 const Catalog = preload("res://scripts/mission_catalog.gd")
 const RouteGateScript = preload("res://scripts/route_gate.gd")
@@ -84,6 +85,10 @@ func researcher_debug_enabled() -> bool:
 	return debug_mode and not experiment_mode
 
 
+func unlock_all_missions() -> bool:
+	return not experiment_mode
+
+
 func _ready() -> void:
 	_ensure_input_actions()
 	load_settings()
@@ -155,10 +160,18 @@ func active_mission_id() -> String:
 
 
 func can_play_mission(id: String) -> bool:
-	return not id.is_empty() and id == active_mission_id() and not session_mission_results.has(id)
+	if id.is_empty() or not Catalog.IDS.has(id):
+		return false
+	if unlock_all_missions():
+		return true
+	return id == active_mission_id() and not session_mission_results.has(id)
 
 
 func mission_session_status(id: String) -> String:
+	if unlock_all_missions():
+		if session_mission_results.has(id):
+			return "open"
+		return "current" if id == selected_mission_id else "open"
 	if session_mission_results.has(id):
 		return "completed"
 	if id == active_mission_id():

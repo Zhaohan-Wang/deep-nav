@@ -69,15 +69,18 @@ func setup(role_name: String, outcome_name: String, _summary: Dictionary) -> voi
 	footer.add_theme_constant_override("separation",12)
 	shell.add_child(footer)
 	_back = AppStyle.button("上一步",Vector2(180,50))
+	AppStyle.set_button_audio_cue(_back,"page_turn")
 	_back.pressed.connect(func(): _show_page(0))
 	footer.add_child(_back)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(spacer)
 	_next = AppStyle.button("下一步",Vector2(220,50),true)
+	AppStyle.set_button_audio_cue(_next,"page_turn")
 	_next.pressed.connect(func(): _show_page(1))
 	footer.add_child(_next)
 	_submit = AppStyle.button("提交个人答案",Vector2(260,50),true)
+	AppStyle.set_button_audio_cue(_submit,"confirm")
 	_submit.pressed.connect(_on_submit)
 	footer.add_child(_submit)
 	_show_page(0)
@@ -88,6 +91,7 @@ func _role_text() -> String:
 
 
 func _show_page(index: int) -> void:
+	var previous_page := _page
 	_page = clampi(index,0,1)
 	for child: Node in _page_host.get_children():
 		child.queue_free()
@@ -100,6 +104,8 @@ func _show_page(index: int) -> void:
 	else:
 		_build_trust_page()
 	_refresh()
+	if _page != previous_page:
+		GameAudio.play_ui_page_turn()
 
 
 func _build_attribution_page() -> void:
@@ -117,6 +123,7 @@ func _build_attribution_page() -> void:
 		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		option.add_theme_font_override("font",AppStyle.FONT_CJK)
 		option.add_theme_font_size_override("font_size",15)
+		AppStyle.wire_button_audio(option,"choice")
 		option.pressed.connect(_on_cause_picked.bind(i + 1))
 		row.add_child(option)
 		_cause_buttons.append(option)
@@ -144,12 +151,15 @@ func _refresh_cause_buttons() -> void:
 		option.modulate.a = 1.0 if picked == 0 or selected else 0.38
 		var fill := Color("11313f") if selected else AppStyle.PANEL_2
 		var border := AppStyle.CYAN if selected else Color("29435a")
-		option.add_theme_stylebox_override("normal",_choice_box(fill,border,2 if selected else 1))
-		option.add_theme_stylebox_override("hover",_choice_box(Color("16394a"),AppStyle.CYAN,2))
+		AppStyle.set_button_hover_styles(
+			option,
+			_choice_box(fill,border,2 if selected else 1),
+			_choice_box(Color("16394a"),AppStyle.CYAN,2),
+			AppStyle.CYAN if selected else AppStyle.TEXT,
+			AppStyle.CYAN
+		)
 		option.add_theme_stylebox_override("pressed",_choice_box(AppStyle.AMBER,AppStyle.TEXT,2))
 		option.add_theme_stylebox_override("focus",StyleBoxEmpty.new())
-		option.add_theme_color_override("font_color",AppStyle.CYAN if selected else AppStyle.TEXT)
-		option.add_theme_color_override("font_hover_color",AppStyle.CYAN)
 		option.text = ("✓ " + CAUSE_OPTIONS[i]) if selected else CAUSE_OPTIONS[i]
 
 

@@ -12,6 +12,7 @@ var _previous_transform_snap := true
 var _previous_vertex_snap := true
 
 func _ready() -> void:
+	Displays.show_shared_page()
 	# 游戏场景需要像素吸附，但它会把标题的慢速漂浮量化成一格一格的跳动。
 	# 仅在封面存活期间关闭吸附，离开封面时立即恢复，不影响游戏内像素画面。
 	_previous_transform_snap = get_viewport().snap_2d_transforms_to_pixel
@@ -37,13 +38,14 @@ func _ready() -> void:
 	var experiment_switch := _mode_switch("实验模式", Game.experiment_mode, func(v): Game.experiment_mode = v)
 	experiment_switch.name = "ExperimentModeSwitch"
 	menu.add_child(experiment_switch)
-	var start := UI.button("开始游戏",Vector2(380,74),true); start.name = "StartButton"; start.pressed.connect(_start); menu.add_child(start)
-	var settings := UI.button("设置",Vector2(380,64)); settings.name = "SettingsButton"; settings.pressed.connect(_open_settings); menu.add_child(settings)
+	var start := UI.button("开始游戏",Vector2(380,74),true); start.name = "StartButton"; UI.set_button_audio_cue(start,"page_turn"); start.pressed.connect(_start); menu.add_child(start)
+	var settings := UI.button("设置",Vector2(380,64)); settings.name = "SettingsButton"; UI.set_button_audio_cue(settings,"popup_open"); settings.pressed.connect(_open_settings); menu.add_child(settings)
 	var data := UI.button("打开数据文件夹",Vector2(380,64))
 	data.name = "OpenDataFolderButton"
 	data.pressed.connect(_open_experiment_logs)
 	menu.add_child(data)
-	var quit := UI.button("退出",Vector2(380,64)); quit.name = "QuitButton"; quit.pressed.connect(func(): get_tree().quit()); menu.add_child(quit)
+	var quit := UI.button("退出",Vector2(380,64)); quit.name = "QuitButton"; UI.set_button_audio_cue(quit,"popup_close"); quit.pressed.connect(func(): get_tree().quit()); menu.add_child(quit)
+	GameAudio.play_ui_popup_open()
 
 
 func _build_cover() -> void:
@@ -166,8 +168,12 @@ func _mode_switch(text: String, value: bool, changed: Callable) -> Control:
 	row.add_child(state_label)
 
 	toggle.resized.connect(func(): toggle.pivot_offset = toggle.size*0.5)
-	toggle.mouse_entered.connect(func(): _animate_switch_hover(toggle,1.08))
-	toggle.mouse_exited.connect(func(): _animate_switch_hover(toggle,1.0))
+	UI.wire_button_audio(toggle,"choice")
+	UI.set_hover_callbacks(
+		toggle,
+		func(): _animate_switch_hover(toggle,1.08),
+		func(): _animate_switch_hover(toggle,1.0)
+	)
 	toggle.toggled.connect(func(on: bool):
 		track.add_theme_stylebox_override("panel",track_on if on else track_off)
 		knob_style.bg_color = UI.AMBER if on else UI.TEXT
@@ -215,11 +221,12 @@ func _open_settings() -> void:
 	box.add_child(_slider("主音量", 0, 100, Game.master_volume * 100.0, func(v): Game.master_volume = v / 100.0, "%d%%"))
 	box.add_child(_slider("航点冷却", 1, 5, Game.waypoint_cooldown_s, func(v): Game.waypoint_cooldown_s = v, "%.0f 秒"))
 	box.add_child(_slider("航点最大距离", 24, 140, Game.waypoint_max_distance, func(v): Game.waypoint_max_distance = v, "%.0f 单位"))
-	var done := UI.button("保存并返回", Vector2(360,72), true); done.pressed.connect(_close_settings); box.add_child(done)
+	var done := UI.button("保存并返回", Vector2(360,72), true); UI.set_button_audio_cue(done,"popup_close"); done.pressed.connect(_close_settings); box.add_child(done)
 
 func _toggle(text: String, value: bool, changed: Callable) -> Control:
 	var row := HBoxContainer.new(); var label := UI.label(text, 23); label.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(label)
 	var check := CheckButton.new(); check.button_pressed = value; check.text = "开启" if value else "关闭"; check.add_theme_font_override("font", UI.FONT_CJK)
+	UI.wire_button_audio(check,"choice")
 	check.toggled.connect(func(v): check.text = "开启" if v else "关闭"; changed.call(v)); row.add_child(check); return row
 
 func _slider(text: String, min_v: float, max_v: float, value: float, changed: Callable, format: String) -> Control:

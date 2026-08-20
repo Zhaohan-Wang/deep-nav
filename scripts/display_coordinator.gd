@@ -23,6 +23,8 @@ extends Node
 
 signal roles_swapped(primary_role: int, secondary_role: int)
 signal shared_key_input(event: InputEventKey)
+## Godot 的 GUI hover 是 Viewport 全局单指针；这里立即保存每个实体鼠标各自命中的控件。
+signal seat_hover_changed(seat: int, hovered: Control)
 
 enum Role { NAVIGATOR, PILOT }
 
@@ -61,6 +63,8 @@ var _transparent_system_cursor: Texture2D
 
 
 func _ready() -> void:
+	# SceneTree 暂停后仍需维护双屏虚拟光标，并把 ESC 转交给暂停菜单。
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	# 铁律 1：内嵌子窗口，让 hover 跟随事件坐标；双屏窗口用 force_native 保持原生。
 	get_tree().root.gui_embed_subwindows = true
 	_install_transparent_system_cursor()
@@ -358,6 +362,10 @@ func seat_button_pressed(seat: int, button: int = MOUSE_BUTTON_LEFT) -> bool:
 	return bool((_seat_buttons.get(seat,{}) as Dictionary).get(button,false))
 
 
+func uses_raw_mouse_mode() -> bool:
+	return _raw_mouse_mode
+
+
 func pilot_seat() -> int:
 	return 0 if primary_role() == Role.PILOT else 1
 
@@ -477,6 +485,8 @@ func _push_motion(target: Viewport, device: int, position: Vector2, delta: Vecto
 	event.relative = delta
 	event.screen_relative = delta
 	target.push_input(event, true)
+	var seat := 0 if device == PRIMARY_SEAT_POINTER_DEVICE else 1
+	seat_hover_changed.emit(seat, target.gui_get_hovered_control())
 
 
 func _secondary_to_root(position: Vector2) -> Vector2:
@@ -622,6 +632,8 @@ func _on_raw_mouse_device_changed(_slot: int, _connected: bool, _product: String
 		]
 	else:
 		_raw_status = "鼠标 %d / 2 · %s" % [RawMice.connected_mouse_count(),_keyboard_status()]
+		seat_hover_changed.emit(0, null)
+		seat_hover_changed.emit(1, null)
 	_refresh_cursor_visibility()
 	_refresh_pointer_hint()
 
