@@ -33,6 +33,15 @@ func _run() -> void:
 	(raw.get("_pressed_keys")[1] as Dictionary)[HID_A] = true
 	assert(is_equal_approx(displays.pilot_turn_axis(),1.0),"external keyboard A key must steer screen-B pilot")
 
+	# 鼠标 HID 桥仍正常、但驾驶席键盘因接收器重连而缺席时，系统键盘必须兜底，
+	# 不能把 WASD 静默变成零输入。
+	raw.set("_keyboards",{0:"Apple Internal Keyboard"})
+	Input.action_press("thrust")
+	assert(is_equal_approx(displays.pilot_thrust_axis(),1.0),
+		"missing external HID keyboard must fall back to system WASD")
+	Input.action_release("thrust")
+	raw.set("_keyboards",{0:"Apple Internal Keyboard",1:"External Keyboard"})
+
 	var raised: bool = bool(stages.deck_raised)
 	raw.key_changed.emit(1,HID_E,true)
 	assert(stages.deck_raised==raised,"pilot keyboard must not toggle navigator map")

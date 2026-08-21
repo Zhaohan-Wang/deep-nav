@@ -393,7 +393,9 @@ func pilot_turn_axis() -> float:
 	var raw_mice := _raw_mice()
 	if raw_mice != null and bool(raw_mice.call("has_keyboard",seat)):
 		return float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_A)) - float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_D))
-	return Input.get_axis("turn_right", "turn_left") if raw_mice == null or not bool(raw_mice.call("is_ready")) else 0.0
+	# 鼠标桥已就绪不代表当前驾驶席键盘也成功枚举。键盘缺席时保留 macOS
+	# 合并键盘输入作为兜底，避免外接接收器重连后整套 WASD 被静默屏蔽。
+	return Input.get_axis("turn_right", "turn_left")
 
 
 func pilot_thrust_axis() -> float:
@@ -401,7 +403,7 @@ func pilot_thrust_axis() -> float:
 	var raw_mice := _raw_mice()
 	if raw_mice != null and bool(raw_mice.call("has_keyboard",seat)):
 		return float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_W)) - float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_S))
-	return Input.get_axis("brake", "thrust") if raw_mice == null or not bool(raw_mice.call("is_ready")) else 0.0
+	return Input.get_axis("brake", "thrust")
 
 
 func swap_roles() -> void:

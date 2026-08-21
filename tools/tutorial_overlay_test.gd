@@ -18,6 +18,10 @@ func _run() -> void:
 		overlay.setup(role)
 		assert(overlay.page_paths.size() == expected, "%s tutorial page count changed" % role)
 		assert(overlay.z_index == TutorialScript.OVERLAY_Z_INDEX, "tutorial z-index changed")
+		var image := overlay.get_node("TutorialImage") as TextureRect
+		assert(image.anchor_left == 0.0 and image.anchor_top == 0.0
+			and image.anchor_right == 1.0 and image.anchor_bottom == 1.0,
+			"tutorial image must cover the full seat viewport")
 		_assert_mouse_passthrough(overlay)
 		for page: int in range(expected):
 			var texture := overlay.get_node("TutorialImage").texture as Texture2D

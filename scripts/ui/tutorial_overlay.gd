@@ -41,11 +41,9 @@ func _paths_for_role(role_name: String) -> PackedStringArray:
 func _build() -> void:
 	_image = TextureRect.new()
 	_image.name = "TutorialImage"
-	# 教程卡缩进并靠右上摆放，给底层实机画面和页面示意图留出呼吸空间。
-	_image.anchor_left = 0.10
-	_image.anchor_top = 0.02
-	_image.anchor_right = 0.98
-	_image.anchor_bottom = 0.90
+	# 教程图按 1920×1080 制作，必须完整覆盖当前席位屏幕；缩进会露出底层画面，
+	# 在不同显示器比例下尤其明显。
+	_image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_image.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
