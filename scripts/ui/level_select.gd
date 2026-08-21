@@ -52,8 +52,9 @@ func _ready() -> void:
 	_build_mission_list(body)
 	var panel := UI.panel()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.custom_minimum_size.y = 680
+	# 详情卡按内容收束在页面上半区，避免“协作提示”之后留下大片无意义的空面板。
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.custom_minimum_size.y = 720
 	body.add_child(panel)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -212,7 +213,8 @@ func _mission_preview(mission: SectorData) -> Control:
 	var path := "res://assets/ui/mission_previews/%s.jpg" % mission.id
 	if ResourceLoader.exists(path):
 		var preview := Control.new()
-		preview.custom_minimum_size = Vector2(0.0,470.0)
+		# 给规则与协作提示保留首屏空间，避免参与者还要滚动才能看到关键说明。
+		preview.custom_minimum_size = Vector2(0.0,360.0)
 		preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		# 凹槽底色完整包住图片：图片低于面板表面，而不是向外投影。
@@ -392,7 +394,7 @@ func _open_confirm() -> void:
 		if _roles_are_locked_for_selected() else
 		("这是新手指引关，双方可自由认领岗位；本关选择不会锁定正式关岗位。"
 		if _selected.id == "practice" else
-		"这是首次正式关，双方可自由认领岗位；开始任务后，第 2、3、4 关将沿用本次选择。")),
+		"这是首次正式关，双方可自由认领岗位；开始任务后，第 2、3 关将沿用本次选择。")),
 		20,UI.TEXT
 	)
 	instruction.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -455,15 +457,15 @@ func _build_claim_card(role_index: int) -> PanelContainer:
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	body.add_theme_constant_override("separation",10)
 	pad.add_child(body)
-	# 原图是 1683×662 横幅：单独占满一行宽度，按比例尽量放大。
+	# 原图是 1683×662 横幅；缩至旧版约 80%，给岗位名称和认领状态更稳定的视觉层级。
 	var icon := TextureRect.new()
 	icon.texture = load(ROLE_ICONS[role_index]) as Texture2D
 	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.custom_minimum_size = Vector2(0,280)
+	icon.custom_minimum_size = Vector2(0,224)
 	icon.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	icon.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	body.add_child(icon)
 	var meta := HBoxContainer.new()

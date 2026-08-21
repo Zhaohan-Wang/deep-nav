@@ -22,6 +22,18 @@ runtime_image() {
   sips -z 900 1600 -s format jpeg -s formatOptions 88 "$cropped_path" --out "$output_dir/$output_name" >/dev/null
 }
 
+runtime_fit_image() {
+  local source_name="$1"
+  local output_name="$2"
+  local source_path="$runtime_dir/$source_name"
+  local resized_path="$temp_dir/${source_name:t:r}-fit.png"
+
+  test -f "$source_path" || { print -u2 "Missing runtime screenshot: $source_path"; return 1; }
+  # 共用流程页必须完整展示标题、正文和底部动作，不使用会切边的满幅裁切。
+  sips -z 900 1392 "$source_path" --out "$resized_path" >/dev/null
+  sips -p 900 1600 --padColor 050914 -s format jpeg -s formatOptions 88 "$resized_path" --out "$output_dir/$output_name" >/dev/null
+}
+
 source_image() {
   local source_path="$1"
   local output_name="$2"
@@ -51,8 +63,8 @@ mkdir -p "$output_dir"
 runtime_image title_screen.png hero.jpg
 runtime_image readme_navigator.png navigator.jpg
 runtime_image readme_pilot.png pilot.jpg
-runtime_image level_select_experiment.png level_select.jpg
-runtime_image role_claim_16x9.png role_claim.jpg
+runtime_fit_image level_select_experiment.png level_select.jpg
+runtime_fit_image role_claim_16x9.png role_claim.jpg
 runtime_image mission_result_success.png result_success.jpg
 runtime_image mission_result.png result_failure.jpg
 runtime_image mission_attribution.png attribution.jpg
