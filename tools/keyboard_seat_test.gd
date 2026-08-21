@@ -16,6 +16,7 @@ func _run() -> void:
 	raw.set("_bridge_ready",true)
 	raw.set("_keyboards",{0:"Apple Internal Keyboard",1:"External Keyboard"})
 	raw.set("_pressed_keys",{0:{},1:{}})
+	raw.set("_keyboard_input_seen",{0:true,1:true})
 
 	var main := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(main)
@@ -36,11 +37,13 @@ func _run() -> void:
 	# 鼠标 HID 桥仍正常、但驾驶席键盘因接收器重连而缺席时，系统键盘必须兜底，
 	# 不能把 WASD 静默变成零输入。
 	raw.set("_keyboards",{0:"Apple Internal Keyboard"})
+	raw.set("_keyboard_input_seen",{0:true,1:false})
 	Input.action_press("thrust")
 	assert(is_equal_approx(displays.pilot_thrust_axis(),1.0),
 		"missing external HID keyboard must fall back to system WASD")
 	Input.action_release("thrust")
 	raw.set("_keyboards",{0:"Apple Internal Keyboard",1:"External Keyboard"})
+	raw.set("_keyboard_input_seen",{0:true,1:true})
 
 	var raised: bool = bool(stages.deck_raised)
 	raw.key_changed.emit(1,HID_E,true)

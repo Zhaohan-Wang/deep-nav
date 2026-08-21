@@ -10,9 +10,12 @@ var _title_art: Sprite2D
 var _title_base := Vector2(58,44)
 var _previous_transform_snap := true
 var _previous_vertex_snap := true
+var _system_shift_held: Dictionary = {0: false, 1: false}
 
 func _ready() -> void:
 	Displays.show_shared_page()
+	if not Displays.seat_key_input.is_connected(_on_seat_key_input):
+		Displays.seat_key_input.connect(_on_seat_key_input)
 	# 游戏场景需要像素吸附，但它会把标题的慢速漂浮量化成一格一格的跳动。
 	# 仅在封面存活期间关闭吸附，离开封面时立即恢复，不影响游戏内像素画面。
 	_previous_transform_snap = get_viewport().snap_2d_transforms_to_pixel
@@ -350,11 +353,11 @@ func _input_device_section() -> Control:
 	var timer := col.create_tween().set_loops()
 	timer.tween_callback(func() -> void:
 		# HID KeyboardOrKeypad：Left Shift=0xE1, Right Shift=0xE5
-		var a_held := (
+		var a_held := bool(_system_shift_held.get(0, false)) or (
 			RawMice.is_hid_key_pressed(0, 0xE1) or
 			RawMice.is_hid_key_pressed(0, 0xE5)
 		)
-		var b_held := (
+		var b_held := bool(_system_shift_held.get(1, false)) or (
 			RawMice.is_hid_key_pressed(1, 0xE1) or
 			RawMice.is_hid_key_pressed(1, 0xE5)
 		)
@@ -364,6 +367,11 @@ func _input_device_section() -> Control:
 	col.add_child(Control.new())  # 底部留白
 
 	return col
+
+
+func _on_seat_key_input(seat: int, event: InputEventKey) -> void:
+	if event.physical_keycode == KEY_SHIFT or event.keycode == KEY_SHIFT:
+		_system_shift_held[seat] = event.pressed
 
 
 func _mouse_seat_text(seat: int) -> String:

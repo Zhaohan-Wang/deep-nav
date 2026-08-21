@@ -23,6 +23,7 @@ extends Node
 
 signal roles_swapped(primary_role: int, secondary_role: int)
 signal shared_key_input(event: InputEventKey)
+signal seat_key_input(seat: int, event: InputEventKey)
 ## Godot 的 GUI hover 是 Viewport 全局单指针；这里立即保存每个实体鼠标各自命中的控件。
 signal seat_hover_changed(seat: int, hovered: Control)
 
@@ -98,6 +99,8 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if event.device == PRIMARY_SEAT_POINTER_DEVICE or event.device == SECONDARY_SEAT_POINTER_DEVICE:
 		return
+	if event is InputEventKey:
+		seat_key_input.emit(0, event as InputEventKey)
 	if _raw_mouse_mode and event is InputEventMouse:
 		# 铁律 2：系统合并指针的事件不参与交互；真正的点击由 HID 席位事件合成。
 		get_viewport().set_input_as_handled()
@@ -391,7 +394,7 @@ func pilot_seat() -> int:
 func pilot_turn_axis() -> float:
 	var seat := pilot_seat()
 	var raw_mice := _raw_mice()
-	if raw_mice != null and bool(raw_mice.call("has_keyboard",seat)):
+	if raw_mice != null and bool(raw_mice.call("has_live_keyboard_input",seat)):
 		return float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_A)) - float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_D))
 	# 鼠标桥已就绪不代表当前驾驶席键盘也成功枚举。键盘缺席时保留 macOS
 	# 合并键盘输入作为兜底，避免外接接收器重连后整套 WASD 被静默屏蔽。
@@ -401,7 +404,7 @@ func pilot_turn_axis() -> float:
 func pilot_thrust_axis() -> float:
 	var seat := pilot_seat()
 	var raw_mice := _raw_mice()
-	if raw_mice != null and bool(raw_mice.call("has_keyboard",seat)):
+	if raw_mice != null and bool(raw_mice.call("has_live_keyboard_input",seat)):
 		return float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_W)) - float(raw_mice.call("is_hid_key_pressed",seat,HID_KEY_S))
 	return Input.get_axis("brake", "thrust")
 
@@ -480,6 +483,7 @@ func _on_secondary_window_input(event: InputEvent) -> void:
 	elif event is InputEventKey:
 		# 共用页可能因 macOS 把副屏原生窗口置为活动窗口而收不到文字输入。
 		# 直接交给当前共用页，避免原生子窗口之间重复派发同一事件。
+		seat_key_input.emit(1, event as InputEventKey)
 		shared_key_input.emit(event as InputEventKey)
 		_secondary_window.set_input_as_handled()
 

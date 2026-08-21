@@ -18,6 +18,9 @@ var _bridge_pid: int = -1
 var _devices: Dictionary = {}
 var _keyboards: Dictionary = {}
 var _pressed_keys: Dictionary = {0: {}, 1: {}}
+## 设备枚举成功不代表接收器会发送 IOHID 按键包；只有真正收到过 key 消息，
+## 才把该席位视为可用的原始键盘通道。
+var _keyboard_input_seen: Dictionary = {0: false, 1: false}
 ## 鼠标席位通过设置页面按钮翻转。
 ## 键盘席位也需要可翻转：否则“键盘 A/B 对应屏幕 A/B”的测试和真实路由会不一致。
 var _mouse_slots_to_seats: Dictionary = {0: 0, 1: 1}
@@ -118,6 +121,7 @@ func _handle_message(message: Dictionary) -> void:
 			else:
 				_keyboards.erase(slot)
 				(_pressed_keys[slot] as Dictionary).clear()
+				_keyboard_input_seen[slot] = false
 			keyboard_device_changed.emit(slot, connected, product)
 			if Game.experiment_mode:
 				ExperimentLog.log_event("input_device_changed","screen_a" if slot==0 else "screen_b",{
@@ -152,6 +156,7 @@ func _handle_message(message: Dictionary) -> void:
 		var usage := int(message.get("usage", 0))
 		var pressed := bool(message.get("pressed", false))
 		if seat >= 0 and seat <= 1:
+			_keyboard_input_seen[seat] = true
 			var keys := _pressed_keys[seat] as Dictionary
 			var was_pressed := keys.has(usage)
 			if was_pressed==pressed:
@@ -206,6 +211,8 @@ func swap_keyboard_seats() -> void:
 
 	var previous_pressed_a := (_pressed_keys.get(0, {}) as Dictionary).duplicate(true)
 	var previous_pressed_b := (_pressed_keys.get(1, {}) as Dictionary).duplicate(true)
+	var previous_seen_a := bool(_keyboard_input_seen.get(0, false))
+	var previous_seen_b := bool(_keyboard_input_seen.get(1, false))
 
 	_keyboards.clear()
 	if not previous_b.is_empty(): _keyboards[0] = previous_b
@@ -213,6 +220,8 @@ func swap_keyboard_seats() -> void:
 
 	_pressed_keys[0] = previous_pressed_b
 	_pressed_keys[1] = previous_pressed_a
+	_keyboard_input_seen[0] = previous_seen_b
+	_keyboard_input_seen[1] = previous_seen_a
 
 	keyboard_device_changed.emit(0, not previous_b.is_empty(), previous_b)
 	keyboard_device_changed.emit(1, not previous_a.is_empty(), previous_a)
@@ -227,6 +236,10 @@ func swap_keyboard_seats() -> void:
 
 func has_keyboard(seat: int) -> bool:
 	return _keyboards.has(seat)
+
+
+func has_live_keyboard_input(seat: int) -> bool:
+	return _keyboards.has(seat) and bool(_keyboard_input_seen.get(seat, false))
 
 
 func connected_keyboard_count() -> int:
