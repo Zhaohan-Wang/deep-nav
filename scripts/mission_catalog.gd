@@ -69,9 +69,15 @@ static func level_1() -> SectorData:
 	ring_a.aspect = 1.08; ring_a.radial_irregularity = 0.12; ring_a.rock_count = 40; ring_a.debris_count = 52
 	var ring_b := _ring("weave_ring_b", Vector3(-70, 0, -12), 21, 37, 7102)
 	ring_b.aspect = 1.10; ring_b.radial_irregularity = 0.14; ring_b.rock_count = 40; ring_b.debris_count = 52
+	# 两枚环分别接向相反侧外圈，封死贴边直达：第一环只能从北侧绕，第二环只能从南侧绕。
+	# 这会形成明确的 S 形换边，而不是让玩家沿同一侧边界跳过整个绕环阶段。
+	var ring_a_south_lock := _band("ring_a_south_lock", Vector3(-245,0,0), Vector3(-245,0,126), 12.0, 7111)
+	ring_a_south_lock.rock_count = 34; ring_a_south_lock.debris_count = 44
+	var ring_b_north_lock := _band("ring_b_north_lock", Vector3(-70,0,-12), Vector3(-70,0,-126), 12.0, 7112)
+	ring_b_north_lock.rock_count = 34; ring_b_north_lock.debris_count = 44
 	# 三道航门的开口按北—南—北交替，不能从环带出口一次瞄向终点。
 	s.belts = [
-		ring_a, ring_b,
+		ring_a, ring_b, ring_a_south_lock, ring_b_north_lock,
 		_spline("gate_1_upper", [45,-112,58,-76,72,-30,88,24], [11,10,9,8], 2.5, 7201, 48),
 		_spline("gate_1_lower", [92,58,105,78,118,98,132,112], [8,9,10,11], 2.4, 7202, 44),
 		_spline("gate_2_upper", [155,-112,168,-98,182,-82,196,-56], [11,10,9,8], 2.4, 7203, 44),

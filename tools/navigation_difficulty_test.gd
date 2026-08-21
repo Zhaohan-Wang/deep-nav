@@ -25,6 +25,11 @@ func _run() -> void:
 			_check(route_risk<=4.0,"%s 规划路线仍穿入危险带（%.1f u）" % [mission.id,route_risk])
 			_check(turns>=2,"%s 不需要至少两次有意义的转向" % mission.id)
 			_check(route_length/direct_length>=1.015,"%s 计划路线几乎就是直线" % mission.id)
+		if mission.id=="level_1":
+			var north_edge := PackedVector3Array([mission.spawn_position,Vector3(-360,0,-90),Vector3(20,0,-90)])
+			var south_edge := PackedVector3Array([mission.spawn_position,Vector3(-360,0,90),Vector3(20,0,90)])
+			_check(_belt_exposure(north_edge,mission)>=8.0,"level_1 北侧贴边仍可跳过两枚环")
+			_check(_belt_exposure(south_edge,mission)>=8.0,"level_1 南侧贴边仍可跳过两枚环")
 		if mission.id=="level_3":
 			var reversals:=_lateral_reversals(mission.route_checkpoints)
 			var lateral_span:=_lateral_span(mission.route_checkpoints)

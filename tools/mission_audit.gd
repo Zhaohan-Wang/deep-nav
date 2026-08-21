@@ -90,6 +90,15 @@ func _run() -> void:
 		if mission.id == "level_1":
 			_check(open_ring_count == 2 and spline_count == 6,
 				"level_1 必须同时保留两处绕环和三道双脊航门")
+			var south_lock := _belt(mission,"ring_a_south_lock")
+			var north_lock := _belt(mission,"ring_b_north_lock")
+			_check(south_lock != null and north_lock != null,
+				"level_1 两枚环必须分别与相反侧外圈封接，不能留下同侧贴边捷径")
+			if south_lock != null and north_lock != null:
+				_check(south_lock.from_point.distance_to(south_lock.to_point) >= 110.0,
+					"level_1 第一环的南侧封口没有接近外圈")
+				_check(north_lock.from_point.distance_to(north_lock.to_point) >= 110.0,
+					"level_1 第二环的北侧封口没有接近外圈")
 			_check(mission.disturbance_slots.is_empty(),
 				"level_1 基线关不得包含实验扰动")
 		if mission.id == "level_2":
@@ -159,6 +168,11 @@ func _run() -> void:
 func _body(mission: SectorData, id: String) -> CelestialBodyData:
 	for body: CelestialBodyData in mission.bodies:
 		if body.id == id: return body
+	return null
+
+func _belt(mission: SectorData, id: String) -> BeltData:
+	for belt: BeltData in mission.belts:
+		if belt.id == id: return belt
 	return null
 
 func _belt_near_route(belt: BeltData, points: PackedVector3Array) -> bool:
