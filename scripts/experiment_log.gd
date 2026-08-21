@@ -3,6 +3,7 @@ extends Node
 
 const ROOT_DIR := "user://experiments"
 const SCHEMA_VERSION := "4.1.0"
+const ANALYSIS_POLICY_VERSION := "outcome-inclusive-1.0"
 const FLUSH_INTERVAL_S := 1.0
 const MAX_PENDING_FRAMES := 6000
 
@@ -220,32 +221,54 @@ func _write_quality_report(absolute_raw_dir: String) -> void:
 	var target_ids := {}
 	for target: Dictionary in targets:
 		var event_id := str(target.get("event_id",""))
-		if event_id.is_empty():
+		if _csv_value_is_missing(event_id):
 			issues.append("存在缺少 event_id 的目标异常")
 		elif target_ids.has(event_id):
 			issues.append("目标异常 event_id 重复：%s" % event_id)
-		target_ids[event_id] = true
-		if str(target.get("trigger_gate_index","")).is_empty():
+		else:
+			target_ids[event_id] = true
+		if _csv_value_is_missing(target.get("trigger_gate_index",null)):
 			issues.append("目标异常缺少触发门编号：%s" % event_id)
-		if float(target.get("window_observed_ms",0.0)) <= 0.0:
+		if (_csv_value_is_missing(target.get("window_observed_ms",null))
+				or float(target.get("window_observed_ms",0.0)) <= 0.0):
 			issues.append("目标异常没有异常后行为观察窗口：%s" % event_id)
 	for waypoint: Dictionary in waypoints:
 		if str(waypoint.get("accepted","false")).to_lower()=="true":
-			if str(waypoint.get("completion_status","")).is_empty():
+			if _csv_value_is_missing(waypoint.get("completion_status",null)):
 				issues.append("已接受航点缺少响应窗口结局：%s" % waypoint.get("waypoint_id",""))
-			if str(waypoint.get("response_window_observed_ms","")).is_empty():
+			if _csv_value_is_missing(waypoint.get("response_window_observed_ms",null)):
 				issues.append("已接受航点缺少响应观察时长：%s" % waypoint.get("waypoint_id",""))
 	for rating: Dictionary in ratings:
-		var values := ["responsibility_self","responsibility_partner","responsibility_navigation_system","responsibility_ship_system","responsibility_environment"]
-		var has_all := true
-		var total := 0
-		for column: String in values:
-			if str(rating.get(column,"")).is_empty(): has_all = false
-			else: total += int(rating[column])
-		if has_all and total != 100:
-			issues.append("责任分配总和不是 100：%s / %s" % [rating.get("participant_id",""),rating.get("event_id","")])
+		var variant := str(rating.get("questionnaire_variant",""))
+		if variant=="event_responsibility_100":
+			var values := ["responsibility_self","responsibility_partner","responsibility_navigation_system","responsibility_ship_system","responsibility_environment"]
+			var has_all := true
+			var total := 0
+			for column: String in values:
+				if _csv_value_is_missing(rating.get(column,null)):
+					has_all = false
+				else:
+					total += int(rating[column])
+			if not has_all:
+				issues.append("责任分配缺少项目：%s / %s" % [rating.get("participant_id",""),rating.get("event_id","")])
+			elif total != 100:
+				issues.append("责任分配总和不是 100：%s / %s" % [rating.get("participant_id",""),rating.get("event_id","")])
+			var confidence := int(rating.get("attribution_confidence",0))
+			if confidence < 1 or confidence > 7:
+				issues.append("归因信心不在 1—7 范围：%s / %s" % [rating.get("participant_id",""),rating.get("event_id","")])
+			if not ["clear","uncertain","not_noticed"].has(str(rating.get("event_awareness",""))):
+				issues.append("异常觉察答案无效：%s / %s" % [rating.get("participant_id",""),rating.get("event_id","")])
+			if str(rating.get("screenshot_available","false")).to_lower()!="true":
+				issues.append("事件问卷缺少参与者画面：%s / %s" % [rating.get("participant_id",""),rating.get("event_id","")])
+		elif variant in ["baseline_state","post_attribution_state"]:
+			var state_values := ["partner_state_reliability","partner_state_reliance","navigation_state_reliability","navigation_state_reliance","ship_state_reliability","ship_state_reliance"]
+			for column: String in state_values:
+				if _csv_value_is_missing(rating.get(column,null)):
+					issues.append("状态评价缺少项目 %s：%s / %s" % [column,rating.get("participant_id",""),rating.get("event_id","")])
+				elif int(rating[column]) < 1 or int(rating[column]) > 7:
+					issues.append("状态评价不在 1—7 范围 %s：%s / %s" % [column,rating.get("participant_id",""),rating.get("event_id","")])
 		var rating_event := str(rating.get("event_id",""))
-		if bool(str(rating.get("target_event_applicable","false")).to_lower()=="true") and not target_ids.has(rating_event):
+		if str(rating.get("target_event_applicable","false")).to_lower()=="true" and not target_ids.has(rating_event):
 			issues.append("目标事件问卷未连接到 target_events.csv：%s" % rating_event)
 	var expected_variants := {
 		"practice":["training_comprehension"],
@@ -256,15 +279,23 @@ func _write_quality_report(absolute_raw_dir: String) -> void:
 	for mission: Dictionary in missions:
 		var mission_id := str(mission.get("mission_id",""))
 		if not expected_variants.has(mission_id) or not str(mission.get("aborted_reason","")).is_empty(): continue
+		var attempt_id := str(mission.get("attempt_id",""))
 		for variant: String in expected_variants[mission_id]:
 			var count := 0
 			for rating: Dictionary in ratings:
-				if str(rating.get("mission_id",""))==mission_id and str(rating.get("questionnaire_variant",""))==variant:
+				if (str(rating.get("mission_id",""))==mission_id
+						and str(rating.get("attempt_id",""))==attempt_id
+						and str(rating.get("questionnaire_variant",""))==variant):
 					count += 1
 			if count != 2:
-				issues.append("任务 %s 的 %s 应有两名参与者记录，实际为 %d" % [mission_id,variant,count])
+				issues.append("任务 %s 的 %s 应有两名参与者记录，实际为 %d" % [attempt_id,variant,count])
 	var report := {
 		"schema_version":SCHEMA_VERSION,"session_id":session_id,"dyad_id":Game.dyad_id,
+		"analysis_policy_version":ANALYSIS_POLICY_VERSION,
+		"analysis_policy_notes":[
+			"任务成功、超时、碰撞或解体均为有效实验结局，不作为质量失败条件。",
+			"目标异常后因解体或自然结算而缩短的观察窗按终止截尾保留，不视为漏记。",
+		],
 		"generated_utc":Time.get_datetime_string_from_system(true,true),
 		"passed":issues.is_empty(),"issue_count":issues.size(),"issues":issues,
 		"row_counts":{"missions":missions.size(),"target_events":targets.size(),"waypoints":waypoints.size(),"ratings":ratings.size()},
@@ -289,6 +320,11 @@ func _read_csv_records(path: String) -> Array[Dictionary]:
 		for i: int in range(mini(header.size(),values.size())): record[header[i]] = values[i]
 		records.append(record)
 	return records
+
+
+func _csv_value_is_missing(value: Variant) -> bool:
+	var text := str(value).strip_edges().to_lower()
+	return text.is_empty() or text=="<null>" or text=="null"
 
 
 func _exit_tree() -> void:

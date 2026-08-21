@@ -52,10 +52,19 @@ func _run() -> void:
 	})
 	for role: String in ["navigator","pilot"]:
 		experiment_log.record_rating(role,"probe-event-01",{
+			"instrument_version":"event-attribution-5.0",
 			"questionnaire_variant":"event_responsibility_100","target_event_applicable":true,
+			"event_awareness":"clear","attribution_confidence":4,"screenshot_available":true,
 			"responsibility_self":20,"responsibility_partner":20,"responsibility_navigation_system":20,
 			"responsibility_ship_system":20,"responsibility_environment":20,
 		})
+	# 状态题的责任字段会序列化为 <null>；质量检查不能把结构性空值误判成 0 分责任预算。
+	experiment_log.record_rating("pilot","probe-state",{
+		"instrument_version":"baseline-state-1.0","questionnaire_variant":"baseline_state",
+		"partner_state_reliability":4,"partner_state_reliance":4,
+		"navigation_state_reliability":4,"navigation_state_reliance":4,
+		"ship_state_reliability":4,"ship_state_reliance":4,
+	})
 	experiment_log.record_mission({
 		"outcome":"probe","success":true,"elapsed":1.0,"active_gameplay_elapsed":1.0,
 		"limit":10.0,"waypoint_requests":2,"waypoints":1,"rejected_waypoints":1,
@@ -79,6 +88,7 @@ func _run() -> void:
 	_check(FileAccess.file_exists("%s/quality_report.json" % raw_dir),"quality report should be generated")
 	var quality := JSON.parse_string(FileAccess.get_file_as_string("%s/quality_report.json" % raw_dir)) as Dictionary
 	_check(bool(quality.get("passed",false)),"synthetic complete pipeline did not pass the quality report")
+	_check(str(quality.get("analysis_policy_version",""))=="outcome-inclusive-1.0","quality report did not record the outcome-inclusive analysis policy")
 	_check(_csv_header_contains("%s/missions.csv" % raw_dir,["damage_taken","waypoint_requests","rejected_waypoints","path_length","path_efficiency_ratio"]),"mission behavior-summary columns are incomplete")
 	_check(_csv_header_contains("%s/target_events.csv" % raw_dir,["pilot_response_latency_ms","recovery_time_ms","heading_error_reduction_3s_deg","heading_error_reduction_5s_deg","collision_within_15s"]),"target-event recovery columns are incomplete")
 	_check(_csv_header_contains("%s/waypoints.csv" % raw_dir,["response_window_observed_ms","waypoint_response_latency_ms","completion_status"]),"waypoint response columns are incomplete")
