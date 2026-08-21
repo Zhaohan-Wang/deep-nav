@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bdnngpdr0mqc6"
-path="res://.godot/imported/role_claim.jpg-e0dfca9c78d1d31a318098f78d1eee83.ctex"
+uid="uid://dv3fvh1uljb6n"
+path="res://.godot/imported/attribution.jpg-e5b4df891c84103c464d758d15744198.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://docs/readme/role_claim.jpg"
-dest_files=["res://.godot/imported/role_claim.jpg-e0dfca9c78d1d31a318098f78d1eee83.ctex"]
+source_file="res://docs/readme/attribution.jpg"
+dest_files=["res://.godot/imported/attribution.jpg-e5b4df891c84103c464d758d15744198.ctex"]
 
 [params]
 

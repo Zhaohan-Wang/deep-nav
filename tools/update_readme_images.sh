@@ -27,11 +27,13 @@ runtime_fit_image() {
   local output_name="$2"
   local source_path="$runtime_dir/$source_name"
   local resized_path="$temp_dir/${source_name:t:r}-fit.png"
+  local padded_path="$temp_dir/${source_name:t:r}-padded.png"
 
   test -f "$source_path" || { print -u2 "Missing runtime screenshot: $source_path"; return 1; }
   # 共用流程页必须完整展示标题、正文和底部动作，不使用会切边的满幅裁切。
   sips -z 900 1392 "$source_path" --out "$resized_path" >/dev/null
-  sips -p 900 1600 --padColor 050914 -s format jpeg -s formatOptions 88 "$resized_path" --out "$output_dir/$output_name" >/dev/null
+  sips -p 900 1600 --padColor 050914 "$resized_path" --out "$padded_path" >/dev/null
+  sips -s format jpeg -s formatOptions 88 "$padded_path" --out "$output_dir/$output_name" >/dev/null
 }
 
 source_image() {
