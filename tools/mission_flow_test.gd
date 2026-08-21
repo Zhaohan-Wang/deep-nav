@@ -133,7 +133,9 @@ func _check_end_ui_layout() -> void:
 	var navigator_training := practice.get("_answers") as Dictionary
 	assert(navigator_training.has("navigator_can_place_waypoint") and not navigator_training.has("pilot_knows_flight_controls"),"navigator must receive navigator-only training items")
 	assert(not _visible_text(practice).contains("W／S"),"navigator was shown pilot control questions")
-	for key: String in ["navigator_can_place_waypoint","navigator_knows_map_toggle","navigator_knows_waypoint_constraints","navigator_knows_route_guidance"]:
+	assert(not navigator_training.has("navigator_knows_map_toggle"),"navigator map-toggle question must be removed")
+	assert((practice.call("_training_items") as Array).size()==3,"navigator practice must contain three questions")
+	for key: String in ["navigator_can_place_waypoint","navigator_knows_waypoint_constraints","navigator_knows_route_guidance"]:
 		navigator_training[key] = "yes"
 	assert(bool(practice.call("_page_complete")),"navigator completion must not wait for pilot items")
 	_assert_visible_controls_inside(practice,host.get_global_rect(),"practice survey page 1")
@@ -145,7 +147,9 @@ func _check_end_ui_layout() -> void:
 	var pilot_training := pilot_practice.get("_answers") as Dictionary
 	assert(pilot_training.has("pilot_knows_flight_controls") and not pilot_training.has("navigator_can_place_waypoint"),"pilot must receive pilot-only training items")
 	assert(not _visible_text(pilot_practice).contains("按 E 键"),"pilot was shown navigator map questions")
-	for key: String in ["pilot_knows_flight_controls","pilot_knows_waypoint_flying","pilot_knows_flight_status","pilot_knows_status_communication"]:
+	assert((pilot_practice.call("_training_items") as Array).size()==3,"pilot practice must contain three questions")
+	assert(not pilot_training.has("pilot_knows_status_communication"),"pilot communication must be merged into waypoint question")
+	for key: String in ["pilot_knows_flight_controls","pilot_knows_waypoint_flying","pilot_knows_flight_status"]:
 		pilot_training[key] = "yes"
 	assert(bool(pilot_practice.call("_page_complete")),"pilot completion must not wait for navigator items")
 	pilot_practice.free()
@@ -210,10 +214,15 @@ func _check_review_policy() -> void:
 	var tracker: Node = load("res://scripts/main.gd").new()
 	game.call("select_mission","practice")
 	tracker.set("_survey_answers",{
+		"navigator":{"training_review_required":false,"training_uncertain":true},
+		"pilot":{"training_review_required":false},
+	})
+	assert((tracker.call("_required_review") as Dictionary).is_empty(),"training uncertainty must allow formal missions")
+	tracker.set("_survey_answers",{
 		"navigator":{"training_review_required":true},
 		"pilot":{"training_review_required":false},
 	})
-	assert(str(tracker.call("_required_review").get("code",""))=="training_comprehension","training uncertainty must require experimenter review")
+	assert(str(tracker.call("_required_review").get("code",""))=="training_comprehension","a training no answer must require experimenter review")
 	game.call("select_mission","level_2")
 	assert(str(tracker.call("_required_review").get("code",""))=="target_event_unexposed","unexposed target anomaly must require replay")
 	game.call("select_mission","level_1")
@@ -239,6 +248,13 @@ func _visible_text(node: Node) -> String:
 func _check_heading_event_counter() -> void:
 	var game := root.get_node("Game")
 	game.call("select_mission","practice")
+	var speed_gauge: Control = load("res://scripts/ui/speed_gauge.gd").new()
+	game.set("ship_heading",0.0)
+	game.set("ship_velocity",Vector3(0.0,0.0,-6.0))
+	assert(is_equal_approx(float(speed_gauge.call("_signed_speed")),6.0),"forward speed must be positive")
+	game.set("ship_velocity",Vector3(0.0,0.0,3.0))
+	assert(is_equal_approx(float(speed_gauge.call("_signed_speed")),-3.0),"reverse speed must be negative")
+	speed_gauge.free()
 	game.set("ship_alive",true)
 	game.set("has_waypoint",true)
 	game.set("ship_position",Vector3.ZERO)

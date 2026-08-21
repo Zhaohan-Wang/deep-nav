@@ -19,13 +19,12 @@
 
 ### 2.1 训练关
 
-操作理解采用“是／不确定／否”，两边只显示自己岗位的四题。
+操作理解采用“是／不确定／否”，两边只显示自己岗位的三题。“不确定”会立即显示对应操作提示，但允许继续进入正式任务；只有选择“否”才进入实验员复核并重试训练关。
 
 领航员字段：
 
 ```text
 navigator_can_place_waypoint
-navigator_knows_map_toggle
 navigator_knows_waypoint_constraints
 navigator_knows_route_guidance
 ```
@@ -36,10 +35,9 @@ navigator_knows_route_guidance
 pilot_knows_flight_controls
 pilot_knows_waypoint_flying
 pilot_knows_flight_status
-pilot_knows_status_communication
 ```
 
-任一参与者对自己的岗位题选择“不确定”或“否”，`training_review_required=true`。双方提交后进入实验员复核；本关不计完成，重新说明该参与者对应岗位的规则后重试。另一岗位题不会显示、不会校验，也不会写入该参与者答案。
+任一参与者对自己的岗位题选择“否”，`training_review_required=true`。双方提交后进入实验员复核；本关不计完成，重新说明该参与者对应岗位的规则后重试。选择“不确定”时记录 `training_uncertain=true` 与对应题目，并在当前页弹出操作提示，但不阻止进入正式任务。另一岗位题不会显示、不会校验，也不会写入该参与者答案。
 
 ### 2.2 搭档状态
 

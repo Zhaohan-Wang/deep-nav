@@ -1751,7 +1751,7 @@ func _required_review() -> Dictionary:
 			if bool(answer.get("training_review_required",false)):
 				return {
 					"code":"training_comprehension",
-					"message":"至少一名参与者对操作规则选择了“不确定”或“否”。\n请实验员重新说明对应规则，再让两名参与者重做训练关。",
+					"message":"至少一名参与者对操作规则选择了“否”。\n请实验员重新说明对应规则，再让两名参与者重做训练关。",
 				}
 	if Game.selected_mission_id in ["level_2","level_3"]:
 		var exposed := _waypoint_drift_events > 0 if Game.selected_mission_id == "level_2" else _ship_shear_events > 0

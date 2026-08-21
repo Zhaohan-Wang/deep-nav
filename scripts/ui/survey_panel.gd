@@ -8,15 +8,13 @@ const INSTRUMENT_VERSION := "post-attribution-state-4.2"
 const BASELINE_INSTRUMENT_VERSION := "baseline-state-1.0"
 const NAVIGATOR_TRAINING_ITEMS: Array[Array] = [
 	["我知道如何在自己的星图上用鼠标设置航点。","navigator_can_place_waypoint"],
-	["我知道可以按 E 键打开或关闭完整星图。","navigator_knows_map_toggle"],
 	["我知道航点有最大设置距离，并且每次设置后需要等待冷却。","navigator_knows_waypoint_constraints"],
 	["我知道需要根据航线情况向驾驶员说明方向，并在需要时更新航点。","navigator_knows_route_guidance"],
 ]
 const PILOT_TRAINING_ITEMS: Array[Array] = [
 	["我知道如何使用 W／S 控制推进或减速，使用 A／D 控制转向。","pilot_knows_flight_controls"],
-	["我知道需要结合航点位置和当前飞行情况驾驶飞船。","pilot_knows_waypoint_flying"],
+	["我知道需要结合航点和当前飞行情况驾驶；航点不清楚或路线需要调整时，应及时告诉领航员。","pilot_knows_waypoint_flying"],
 	["我知道需要观察飞船的速度、方向和船体状态，及时避开危险。","pilot_knows_flight_status"],
-	["我知道在航点不清楚或需要调整路线时，应及时向领航员说明。","pilot_knows_status_communication"],
 ]
 const TRUST_ORDERS: Array[Array] = [
 	["partner","navigation","ship"], ["partner","ship","navigation"],
@@ -49,7 +47,7 @@ func setup(role_name: String,outcome_name: String,summary: Dictionary) -> void:
 	var is_training := _mission_id == "practice"
 	var is_baseline := _mission_id == "level_1"
 	_answers = {
-		"instrument_version":("training-role-comprehension-4.1" if is_training else
+		"instrument_version":("training-role-comprehension-4.2" if is_training else
 			(BASELINE_INSTRUMENT_VERSION if is_baseline else INSTRUMENT_VERSION)),
 		"questionnaire_variant":("training_comprehension" if is_training else
 			("baseline_state" if is_baseline else "post_attribution_state")),
@@ -57,6 +55,8 @@ func setup(role_name: String,outcome_name: String,summary: Dictionary) -> void:
 		"outcome_success":bool(_summary.get("success",false)),
 		"trust_block_order":_page_ids.duplicate() if _mission_id!="practice" else [],
 		"training_review_required":false,
+		"training_uncertain":false,
+		"training_uncertain_items":[],
 	}
 	for item: Array in _training_items(): _answers[str(item[1])] = null
 	_build()
@@ -132,7 +132,36 @@ func _add_training_choice(question: String,key: String) -> void:
 	_training_buttons[key]=buttons; _page_host.add_child(row); _refresh_training(key)
 
 func _record_training(key:String,value:String)->void:
-	_answers[key]=value; _refresh_training(key); _refresh()
+	_answers[key]=value
+	if value=="unsure":
+		_answers.training_uncertain=true
+		var uncertain_items := _answers.training_uncertain_items as Array
+		if not uncertain_items.has(key): uncertain_items.append(key)
+		_show_uncertain_tip(key)
+	_refresh_training(key)
+	_refresh()
+
+func _show_uncertain_tip(key:String)->void:
+	var existing:=get_node_or_null("TrainingUnsureTip")
+	if existing!=null: existing.queue_free()
+	var cover:=ColorRect.new(); cover.name="TrainingUnsureTip"; cover.color=Color(0.004,0.012,0.03,0.98); cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); cover.z_index=20; cover.mouse_filter=Control.MOUSE_FILTER_STOP; add_child(cover)
+	var center:=CenterContainer.new(); center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); center.offset_left=56; center.offset_right=-56; center.offset_top=44; center.offset_bottom=-44; cover.add_child(center)
+	var card:=AppStyle.panel(); card.custom_minimum_size=Vector2(660,330); center.add_child(card)
+	var box:=VBoxContainer.new(); box.alignment=BoxContainer.ALIGNMENT_CENTER; box.add_theme_constant_override("separation",18); card.add_child(box)
+	var title:=AppStyle.label("操作提示",28,AppStyle.AMBER); title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; box.add_child(title)
+	var body:=AppStyle.label(_uncertain_tip_text(key),18,AppStyle.TEXT); body.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; body.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; body.size_flags_vertical=Control.SIZE_EXPAND_FILL; box.add_child(body)
+	var note:=AppStyle.label("看完提示后可以继续作答；选择“不确定”不会要求重做训练关。",15,AppStyle.MUTED); note.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; note.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; box.add_child(note)
+	var close:=AppStyle.button("知道了 · 继续",Vector2(250,54),true); close.pressed.connect(cover.queue_free); box.add_child(close)
+
+func _uncertain_tip_text(key:String)->String:
+	match key:
+		"navigator_can_place_waypoint": return "在星图可用时，用鼠标点击希望飞船前往的位置即可设置航点。"
+		"navigator_knows_waypoint_constraints": return "航点只能放在当前允许的距离内；每次放置后需等冷却结束，才能更新下一处航点。"
+		"navigator_knows_route_guidance": return "请结合航线和危险区告诉驾驶员方向；路线变化时，及时更新航点并口头提醒。"
+		"pilot_knows_flight_controls": return "W 向前推进，S 减速或倒车，A／D 控制左右转向。"
+		"pilot_knows_waypoint_flying": return "结合航点位置和飞船当前状态驾驶；看不清航点或认为路线需要调整时，及时告诉领航员。"
+		"pilot_knows_flight_status": return "持续留意速度、方向和船体状态；接近危险时提前转向或减速。"
+	return "请根据刚才的练习回想这一操作；进入正式关后仍可以和搭档及时沟通。"
 
 func _refresh_training(key:String)->void:
 	var values:Array[String]=["yes","unsure","no"]; var picked:=str(_answers.get(key,"")); var buttons:=_training_buttons.get(key,[]) as Array
@@ -176,7 +205,7 @@ func _on_submit()->void:
 	if _mission_id=="practice":
 		for item: Array in _training_items():
 			var key := str(item[1])
-			if str(_answers.get(key,""))!="yes": _answers.training_review_required=true
+			if str(_answers.get(key,""))=="no": _answers.training_review_required=true
 	_answers.response_time=float(Time.get_ticks_msec()-_started_ms)/1000.0
 	_submit.disabled=true; _submit.text="已提交 · 等待搭档"
 	submitted.emit(role,_answers.duplicate(true)); _show_waiting()
