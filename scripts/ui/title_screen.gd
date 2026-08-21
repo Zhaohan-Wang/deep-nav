@@ -371,7 +371,10 @@ func _input_device_section() -> Control:
 
 func _on_seat_key_input(seat: int, event: InputEventKey) -> void:
 	if event.physical_keycode == KEY_SHIFT or event.keycode == KEY_SHIFT:
-		_system_shift_held[seat] = event.pressed
+		# 普通系统事件可能被 macOS 同时送到两个窗口，不能据此认定来自外接键盘。
+		# 系统输入只归席位 A；席位 B 的指示必须来自 RawMice 的真实 HID 状态。
+		if seat == 0:
+			_system_shift_held[0] = event.pressed
 
 
 func _mouse_seat_text(seat: int) -> String:

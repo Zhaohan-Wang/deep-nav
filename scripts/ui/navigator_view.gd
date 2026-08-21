@@ -106,7 +106,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	# 对已识别的席位使用固定 HID 分流；如果领航席键盘未成功枚举，则允许
 	# macOS 合并键盘事件兜底，避免鼠标桥正常但 E 键完全失效。
 	var navigator_seat := 0 if Displays.role_for_seat(0)==Displays.Role.NAVIGATOR else 1
-	if event.is_action_pressed("toggle_nav_deck") and not RawMice.has_live_keyboard_input(navigator_seat):
+	if (event.is_action_pressed("toggle_nav_deck") and navigator_seat == 0
+			and not RawMice.has_live_keyboard_input(navigator_seat)):
 		_toggle_map(0,"system_fallback")
 		get_viewport().set_input_as_handled()
 
