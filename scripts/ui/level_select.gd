@@ -6,7 +6,10 @@ const Preview = preload("res://scripts/ui/mission_preview.gd")
 
 ## 认领角色卡的顺序：0 = 领航员，1 = 驾驶员。
 const ROLE_NAMES: Array[String] = ["领航员", "驾驶员"]
-const ROLE_BLURBS: Array[String] = ["掌握星图与航线 · 使用所在屏幕键盘的 E 键开关星图", "掌握驾驶舱与推进 · 使用所在屏幕键盘的 WASD 驾驶"]
+const ROLE_BLURBS: Array[String] = [
+	"负责观察星图、规划安全路线并放置和更新航点，引导飞船避开危险、抵达目标。",
+	"负责依据航点和双方沟通操控飞船，调整速度与方向，安全通过障碍、抵达目标。",
+]
 const ROLE_ICONS: Array[String] = [UiStyle.NAVIGATOR_BADGE_PATH, UiStyle.PILOT_BADGE_PATH]
 const SEAT_NONE: int = -1
 const SEAT_A: int = 0
@@ -468,26 +471,22 @@ func _build_claim_card(role_index: int) -> PanelContainer:
 	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	body.add_child(icon)
-	var meta := HBoxContainer.new()
-	meta.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	meta.add_theme_constant_override("separation",16)
-	body.add_child(meta)
+	# 岗位名称、核心职责与认领状态沿角色图中轴排列，阅读顺序保持从上到下。
 	var names := VBoxContainer.new()
 	names.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	names.add_theme_constant_override("separation",2)
-	meta.add_child(names)
+	names.add_theme_constant_override("separation",4)
+	body.add_child(names)
 	var title := UI.label(ROLE_NAMES[role_index],28,UI.TEXT)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	names.add_child(title)
-	var blurb := UI.label(ROLE_BLURBS[role_index],16,UI.MUTED)
+	var blurb := UI.label(ROLE_BLURBS[role_index],17,UI.MUTED)
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	blurb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	names.add_child(blurb)
-	var status := UI.label("尚未认领 · 点击卡片认领",22,UI.MUTED)
-	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var status := UI.label("尚未认领 · 点击卡片认领",20,UI.MUTED)
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	meta.add_child(status)
+	body.add_child(status)
 	_claim_status.append(status)
 	return card
 
