@@ -2,11 +2,11 @@ class_name MissionCatalog
 extends RefCounted
 ## 正式实验关卡目录。所有地图变化都从这里生成，避免复制运行场景。
 
-const IDS: PackedStringArray = ["practice", "level_1", "level_2", "level_3", "level_4"]
+const IDS: PackedStringArray = ["practice", "level_1", "level_2", "level_3"]
 
 
 static func all() -> Array[SectorData]:
-	return [practice(), level_1(), level_2(), level_3(), level_4()]
+	return [practice(), level_1(), level_2(), level_3()]
 
 
 static func by_id(id: String) -> SectorData:
@@ -46,108 +46,61 @@ static func practice() -> SectorData:
 
 static func level_1() -> SectorData:
 	var s := SectorCatalog.make_sector_01()
-	_meta(s, "level_1", 1, "织环航道", "正常协作", 160.0, PackedStringArray(),
-		"建立无扰动基线；三枚织环依次挡住直航线，必须分别绕行南—北—南，整体航程显著拉长。")
-	s.participant_name = "织环航道"
-	s.participant_briefing = "依次绕过三处环形尘带，将飞船送至绿洲近空。"
-	s.participant_hint = "每次先规划眼前一处尘带，绕过后再更新航点。"
-	s.map_view_half = 78.0
-	s.spawn_position = Vector3(-280, 0, 52)
-	_move_body(s, "haven", Vector3(280, 0, -56))
-	_move_body(s, "sol", Vector3(-230, 0, -55))
-	_move_body(s, "ring", Vector3(-120, 0, 6))
-	_move_body(s, "cinder", Vector3(135, 0, 10))
+	_meta(s, "level_1", 1, "环门航道", "正常协作", 210.0, PackedStringArray(),
+		"唯一无扰动基线；前半段绕过两枚错位环带，后半段连续通过三道交替开口航门。")
+	s.display_name = "环门航道"
+	s.participant_name = "环门航道"
+	s.briefing = "正式任务 01：先绕过环形尘带，再依次通过三道错位航门。"
+	s.participant_briefing = "绕过两处环形尘带并通过三道错位航门，将飞船送至河港近空。"
+	s.participant_hint = "先逐段规划绕环路线；进入航门区后提前减速，并按开口更新航点。"
+	s.map_view_half = 82.0
+	s.spawn_position = Vector3(-410, 0, 48)
+	_move_body(s, "haven", Vector3(370, 0, -42))
+	_move_body(s, "sol", Vector3(-320, 0, -48))
+	_move_body(s, "ring", Vector3(-245, 0, 8))
+	_move_body(s, "cinder", Vector3(-70, 0, -12))
 	_resize_body(s, "sol", 26.0)
 	_reskin_body(s, "ring", "织环甲", "res://assets/planets/GasPlanetLayers/GasPlanetLayers.tscn", 16.0, 331, "gas")
-	_reskin_body(s, "cinder", "织环丙", "res://assets/planets/GasPlanet/GasPlanet.tscn", 15.0, 519, "gas")
-	_reskin_body(s, "haven", "绿洲", "res://assets/planets/Rivers/Rivers.tscn", 15.0, 108, "habitable")
-	_add_body(s, "weave_mid", "织环乙", "res://assets/planets/GasPlanetLayers/GasPlanetLayers.tscn",
-		Vector3(8, 0, -16), 14.0, 447, CelestialBodyData.Kind.PLANET, "gas")
-	# 三环横贯航线：南绕甲 → 北绕乙 → 南绕丙。直冲会依次撞进三枚环带。
-	var ring_a := _ring("weave_ring_a", Vector3(-120, 0, 6), 22, 38, 7101)
-	ring_a.aspect = 1.08; ring_a.radial_irregularity = 0.12
-	ring_a.rock_count = 40; ring_a.debris_count = 52; ring_a.flight_rock_ratio = 0.55; ring_a.rock_scale = 1.06
-	var ring_b := _ring("weave_ring_b", Vector3(8, 0, -16), 20, 36, 7102)
-	ring_b.aspect = 1.10; ring_b.radial_irregularity = 0.14
-	ring_b.rock_count = 38; ring_b.debris_count = 50; ring_b.flight_rock_ratio = 0.55; ring_b.rock_scale = 1.06
-	var ring_c := _ring("weave_ring_c", Vector3(135, 0, 10), 21, 37, 7103)
-	ring_c.aspect = 1.06; ring_c.radial_irregularity = 0.13
-	ring_c.rock_count = 40; ring_c.debris_count = 52; ring_c.flight_rock_ratio = 0.55; ring_c.rock_scale = 1.06
-	# 上下两条长碎石封边把“溜边”路径堵掉，玩家只能在中间三环链之间连续决策。
-	var top_lock := _band("top_lock", Vector3(-250, 0, 88), Vector3(250, 0, 88), 20.0, 7104)
-	top_lock.rock_count = 40; top_lock.debris_count = 50
-	var bottom_lock := _band("bottom_lock", Vector3(-250, 0, -92), Vector3(250, 0, -92), 20.0, 7105)
-	bottom_lock.rock_count = 40; bottom_lock.debris_count = 50
-	s.belts = [ring_a, ring_b, ring_c, top_lock, bottom_lock, _boundary(6204, 122.0, 3.15)]
-	# 每个检查点都离环带外缘至少约 12u，避免审核路线擦芯。
+	_reskin_body(s, "cinder", "织环乙", "res://assets/planets/GasPlanet/GasPlanet.tscn", 15.0, 519, "gas")
+	_reskin_body(s, "haven", "河港", "res://assets/planets/Rivers/Rivers.tscn", 15.0, 452, "habitable")
+	_add_body(s, "gate_beacon", "寒镜", "res://assets/planets/IceWorld/IceWorld.tscn",
+		Vector3(145, 0, 78), 14.0, 812, CelestialBodyData.Kind.PLANET, "ice")
+	var ring_a := _ring("weave_ring_a", Vector3(-245, 0, 8), 22, 38, 7101)
+	ring_a.aspect = 1.08; ring_a.radial_irregularity = 0.12; ring_a.rock_count = 40; ring_a.debris_count = 52
+	var ring_b := _ring("weave_ring_b", Vector3(-70, 0, -12), 21, 37, 7102)
+	ring_b.aspect = 1.10; ring_b.radial_irregularity = 0.14; ring_b.rock_count = 40; ring_b.debris_count = 52
+	# 三道航门的开口按北—南—北交替，不能从环带出口一次瞄向终点。
+	s.belts = [
+		ring_a, ring_b,
+		_spline("gate_1_upper", [45,-112,58,-76,72,-30,88,24], [11,10,9,8], 2.5, 7201, 48),
+		_spline("gate_1_lower", [92,58,105,78,118,98,132,112], [8,9,10,11], 2.4, 7202, 44),
+		_spline("gate_2_upper", [155,-112,168,-98,182,-82,196,-56], [11,10,9,8], 2.4, 7203, 44),
+		_spline("gate_2_lower", [200,-20,214,22,228,72,242,112], [8,9,10,11], 2.7, 7204, 48),
+		_spline("gate_3_upper", [270,-112,284,-76,298,-30,312,22], [11,10,9,8], 2.5, 7205, 48),
+		_spline("gate_3_lower", [316,56,330,78,344,98,358,112], [8,9,10,11], 2.4, 7206, 44),
+		_boundary(6204, 126.0, 3.65),
+	]
 	s.route_checkpoints = PackedVector3Array([
-		s.spawn_position, Vector3(-240, 0, 48), Vector3(-190, 0, 40),
-		Vector3(-170, 0, 0), Vector3(-155, 0, -40), Vector3(-120, 0, -48), Vector3(-80, 0, -46),
-		Vector3(-55, 0, -42), Vector3(-38, 0, -5), Vector3(-30, 0, 25), Vector3(8, 0, 32), Vector3(45, 0, 28),
-		Vector3(75, 0, 20), Vector3(90, 0, -10), Vector3(105, 0, -38), Vector3(135, 0, -42), Vector3(175, 0, -48),
-		Vector3(230, 0, -56), Vector3(280, 0, -56),
+		s.spawn_position, Vector3(-370,0,46), Vector3(-320,0,42),
+		Vector3(-292,0,8), Vector3(-278,0,-38), Vector3(-245,0,-48), Vector3(-205,0,-44),
+		Vector3(-155,0,-38), Vector3(-125,0,-4), Vector3(-112,0,28), Vector3(-70,0,38), Vector3(-28,0,30),
+		Vector3(20,0,24), Vector3(65,0,38), Vector3(88,0,42), Vector3(130,0,18),
+		Vector3(175,0,-20), Vector3(195,0,-38), Vector3(225,0,-38), Vector3(270,0,-4),
+		Vector3(305,0,34), Vector3(320,0,38), Vector3(345,0,-4), Vector3(370,0,-42),
 	])
-	s.safe_gate_points = PackedVector3Array([Vector3(175, 0, -48)])
-	s.relay_stations = PackedVector3Array([Vector3(45, 0, 28)])
+	s.safe_gate_points = PackedVector3Array([Vector3(320,0,38)])
+	s.relay_stations = PackedVector3Array([Vector3(20,0,24), Vector3(225,0,-38)])
 	return s
 
 
 static func level_2() -> SectorData:
 	var s := SectorCatalog.make_sector_01()
-	_meta(s, "level_2", 2, "折光走廊", "精确引导", 180.0, PackedStringArray(),
-		"四组开口错位的碎石门强制减速—转向—再加速；开口依次北/南/北/南，不能一次瞄穿。")
-	s.display_name = "折光走廊"
-	s.participant_name = "折光走廊"
-	s.briefing = "正式任务 02：依次穿过四组错位航门，避免一次性指向远端。"
-	s.participant_briefing = "依次穿过四道错位航门，将飞船送至河港近空。"
-	s.participant_hint = "各航门的开口方向不同。接近转弯前请提前减速。"
-	s.map_view_half = 74.0
-	s.spawn_position = Vector3(-350, 0, 48)
-	_move_body(s, "haven", Vector3(350, 0, -48))
-	_move_body(s, "sol", Vector3(-290, 0, -55))
-	_move_body(s, "ring", Vector3(-40, 0, 78))
-	_move_body(s, "cinder", Vector3(220, 0, -72))
-	_resize_body(s, "sol", 26.0)
-	_reskin_body(s, "ring", "寒镜", "res://assets/planets/IceWorld/IceWorld.tscn", 14.0, 812, "ice")
-	_reskin_body(s, "cinder", "熔核", "res://assets/planets/LavaWorld/LavaWorld.tscn", 14.0, 604, "lava")
-	_reskin_body(s, "haven", "河港", "res://assets/planets/Rivers/Rivers.tscn", 15.0, 452, "habitable")
-	# 四组门：开口分别在北 / 南 / 北 / 南。上脊堵住南侧，下脊堵住北侧，开口错开。
-	s.belts = [
-		# 门1：开口偏北（约 z=+42）
-		_spline("gate_1_upper", [-220, -108, -210, -70, -198, -20, -185, 28], [10, 10, 9, 8], 2.6, 5201, 52),
-		_spline("gate_1_lower", [-180, 58, -168, 78, -155, 96, -142, 108], [8, 9, 10, 11], 2.4, 5202, 44),
-		# 门2：开口偏南（约 z=-38）
-		_spline("gate_2_upper", [-110, -108, -98, -96, -86, -82, -74, -58], [11, 10, 9, 8], 2.4, 5203, 44),
-		_spline("gate_2_lower", [-70, -20, -58, 20, -44, 70, -30, 108], [8, 9, 10, 11], 2.8, 5204, 52),
-		# 门3：开口偏北（约 z=+36）
-		_spline("gate_3_upper", [10, -108, 22, -70, 34, -22, 48, 22], [10, 10, 9, 8], 2.6, 5205, 52),
-		_spline("gate_3_lower", [52, 52, 64, 74, 78, 94, 92, 108], [8, 9, 10, 11], 2.4, 5206, 44),
-		# 门4：开口偏南（约 z=-42）
-		_spline("gate_4_upper", [130, -108, 142, -96, 154, -82, 166, -62], [11, 10, 9, 8], 2.4, 5207, 44),
-		_spline("gate_4_lower", [170, -24, 182, 16, 196, 66, 210, 108], [8, 9, 10, 11], 2.8, 5208, 52),
-		_boundary(6201, 120.0, 3.75),
-	]
-	s.route_checkpoints = PackedVector3Array([
-		s.spawn_position, Vector3(-300, 0, 46), Vector3(-250, 0, 44),
-		Vector3(-210, 0, 42), Vector3(-185, 0, 42), Vector3(-150, 0, 20),
-		Vector3(-110, 0, -10), Vector3(-90, 0, -36), Vector3(-70, 0, -38), Vector3(-30, 0, -10),
-		Vector3(10, 0, 16), Vector3(40, 0, 34), Vector3(55, 0, 36), Vector3(100, 0, 10),
-		Vector3(140, 0, -24), Vector3(160, 0, -42), Vector3(175, 0, -42), Vector3(230, 0, -44),
-		Vector3(290, 0, -46), Vector3(350, 0, -48),
-	])
-	s.safe_gate_points = PackedVector3Array([Vector3(230, 0, -44)])
-	s.relay_stations = PackedVector3Array([Vector3(-30, 0, -10), Vector3(100, 0, 10)])
-	return s
-
-
-static func level_3() -> SectorData:
-	var s := SectorCatalog.make_sector_01()
-	_meta(s, "level_3", 3, "磁暴坐标区", "导航异常归因", 200.0,
+	_meta(s, "level_2", 2, "磁暴坐标区", "导航异常归因", 200.0,
 		PackedStringArray(["waypoint_drift"]),
 		"正常航行建立共同状态后，只武装一次领航点击偏移；异常后继续保留完整恢复航段。")
 	s.display_name = "磁暴坐标区"
 	s.participant_name = "寂井侧翼"
-	s.briefing = "正式任务 03：依次通过两段校准井。导航读数可能出现异常，请继续协作。"
+	s.briefing = "正式任务 02：依次通过两段校准井。导航读数可能出现异常，请继续协作。"
 	s.participant_briefing = "依次通过两段狭窄航道，将飞船送至陆脊近空。"
 	s.participant_hint = "航道出入口附近有天体遮挡。请简短沟通，并提前规划绕行方向。"
 	s.map_view_half = 74.0
@@ -197,14 +150,14 @@ static func level_3() -> SectorData:
 	return s
 
 
-static func level_4() -> SectorData:
+static func level_3() -> SectorData:
 	var s := SectorCatalog.make_sector_01()
-	_meta(s, "level_4", 4, "太阳风剪切", "协作恢复", 195.0,
+	_meta(s, "level_3", 3, "太阳风剪切", "协作恢复", 195.0,
 		PackedStringArray(["ship_shear"]),
 		"先完成前半段连续弯道以建立共同预期，在波浪航槽几何中段触发唯一横向漂移；随后保留完整恢复航段。")
 	s.display_name = "太阳风剪切"
 	s.participant_name = "潮汐远航"
-	s.briefing = "正式任务 04：通过太阳风剪切带，并在异常后恢复稳定航线。"
+	s.briefing = "正式任务 03：通过太阳风剪切带，并在异常后恢复稳定航线。"
 	s.participant_briefing = "沿弯曲航道前进，将飞船送至潮汐站近空。"
 	s.participant_hint = "请沿弯道分段设置航点，连续转向时及时减速。"
 	s.map_view_half = 72.0

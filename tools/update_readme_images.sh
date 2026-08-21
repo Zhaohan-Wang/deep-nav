@@ -32,6 +32,17 @@ source_image() {
   sips -z "$height" "$width" -s format jpeg -s formatOptions 88 "$source_path" --out "$output_dir/$output_name" >/dev/null
 }
 
+map_image() {
+	local mission="$1"
+	local source_path="$overview_dir/$mission.png"
+	local cropped_path="$temp_dir/map-$mission-cropped.png"
+
+	test -f "$source_path" || { print -u2 "Missing map overview: $source_path"; return 1; }
+	# 双屏采集在部分 Mac 上会把 16:9 角色画面放进纵向双倍缓冲区；取中央完整地图区域。
+	sips -c 972 1728 "$source_path" --out "$cropped_path" >/dev/null
+	sips -z 900 1600 -s format jpeg -s formatOptions 88 "$cropped_path" --out "$output_dir/map_$mission.jpg" >/dev/null
+}
+
 mkdir -p "$output_dir"
 
 runtime_image title_screen.png hero.jpg
@@ -45,9 +56,9 @@ runtime_image mission_attribution.png attribution.jpg
 runtime_image survey_page_1.png survey.jpg
 runtime_image thank_you.png thank_you.jpg
 
-for mission in practice level_1 level_2 level_3 level_4; do
+for mission in practice level_1 level_2 level_3; do
   source_image "$preview_dir/$mission.jpg" "mission_$mission.jpg" 539 1270
-  runtime_image "../star_map_overviews/$mission.png" "map_$mission.jpg"
+  map_image "$mission"
 done
 
 print "README images refreshed in $output_dir"

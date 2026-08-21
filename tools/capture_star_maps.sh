@@ -10,7 +10,7 @@ trap 'rm -f "$LOG_FILE"' EXIT
 	--path "$PROJECT_ROOT" \
 	--script res://tools/star_map_capture.gd
 
-if ! rg -q 'STAR_MAP_CAPTURE_ALL_OK count=5' "$LOG_FILE"; then
+if ! rg -q 'STAR_MAP_CAPTURE_ALL_OK count=4' "$LOG_FILE"; then
 	print -u2 "DEEP_NAV_STAR_MAP_CAPTURE_FAILED"
 	exit 1
 fi

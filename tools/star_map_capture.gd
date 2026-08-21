@@ -3,7 +3,7 @@ extends SceneTree
 
 const OUT_DIR := "res://artifacts/star_maps"
 const OVERVIEW_DIR := "res://artifacts/star_map_overviews"
-const MISSIONS: PackedStringArray = ["practice","level_1","level_2","level_3","level_4"]
+const MISSIONS: PackedStringArray = ["practice","level_1","level_2","level_3"]
 
 
 func _initialize() -> void:

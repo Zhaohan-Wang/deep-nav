@@ -39,7 +39,7 @@ func _run() -> void:
 	assert(game.session_mission_results.is_empty(),"temporary results must reset with a new sequence")
 	game.set("experiment_mode",false)
 	assert(game.unlock_all_missions(),"preview mode must open every mission")
-	assert(game.can_play_mission("level_4"),"turning experiment mode off must make every catalog mission playable")
+	assert(game.can_play_mission("level_3"),"turning experiment mode off must make every catalog mission playable")
 	var free_page := (load("res://scenes/level_select.tscn") as PackedScene).instantiate()
 	root.add_child(free_page)
 	await process_frame
@@ -60,7 +60,7 @@ func _assert_page_state(active_index: int) -> void:
 	await process_frame
 	await process_frame
 	var cards: Array = page.get("_cards")
-	assert(cards.size() == 5,"mission progress rail must show all five stages")
+	assert(cards.size() == 4,"mission progress rail must show all four stages")
 	var enabled_count := 0
 	for i: int in range(cards.size()):
 		var card := cards[i] as Button

@@ -1,5 +1,5 @@
 extends SceneTree
-## 第一至第四关逐关检查：每人连续完成 100 分责任分配与状态信任，只在最后等待一次。
+## 三个正式任务逐关检查；目标异常关连续完成责任分配与状态信任。
 
 func _initialize() -> void:
 	_run.call_deferred()
@@ -12,7 +12,7 @@ func _run() -> void:
 	await _check_mission_capture_for_all_four()
 	await _check_allocator_for_all_four()
 	await _check_each_level_enters_allocator()
-	print("FOUR_MISSION_QUESTIONNAIRE_OK target_levels=3,4 responsibility_then_state=continuous awareness_check=true single_target_event=true")
+	print("FOUR_MISSION_QUESTIONNAIRE_OK target_levels=2,3 responsibility_then_state=continuous awareness_check=true single_target_event=true")
 	quit(0)
 
 func _check_state_surveys() -> void:
@@ -44,17 +44,17 @@ func _check_mission_capture_for_all_four() -> void:
 		root.add_child(main)
 		for i: int in range(5): await process_frame
 		main.set("_mission_elapsed",42.5)
-		if mission_id == "level_3": main.set("_waypoint_drift_events",1)
-		if mission_id == "level_4": main.set("_ship_shear_events",1)
-		if mission_id in ["level_3","level_4"]:
-			var target_type := "waypoint_drift" if mission_id=="level_3" else "ship_shear"
+		if mission_id == "level_2": main.set("_waypoint_drift_events",1)
+		if mission_id == "level_3": main.set("_ship_shear_events",1)
+		if mission_id in ["level_2","level_3"]:
+			var target_type := "waypoint_drift" if mission_id=="level_2" else "ship_shear"
 			var target_record := _record(mission_id)
 			target_record["capture_kind"] = "target_peak"
 			game.call("store_event_review",target_type,target_record)
 		main.call("_capture_mission_review","完成",true)
 		var record := game.call("event_review",mission_id) as Dictionary
 		assert(str(record.get("mission_id",""))==mission_id,"%s review was not saved" % mission_id)
-		if mission_id in ["level_3","level_4"]:
+		if mission_id in ["level_2","level_3"]:
 			assert(str(record.get("capture_kind",""))=="target_peak","%s did not use the target peak frame" % mission_id)
 			_assert_two_images(record,mission_id)
 		else:
@@ -81,15 +81,15 @@ func _check_allocator_for_all_four() -> void:
 		assert(text.contains("我自己（领航员）") and text.contains("我的搭档（驾驶员）"),"%s role labels were wrong" % mission_id)
 		assert(text.contains("领航系统") and text.contains("飞船控制系统") and text.contains("外部环境"),"%s responsibility labels were wrong" % mission_id)
 		assert(text.contains("事件前后航迹") and panel.find_child("MissionFlightTrail",true,false)!=null,"%s flight trail review was missing" % mission_id)
-		if mission_id == "level_3":
+		if mission_id == "level_2":
 			var trail_review := panel.find_child("MissionFlightTrail",true,false)
 			assert((trail_review.get("_target_positions") as PackedVector2Array).size()==1,"level 3 did not draw exactly one target event")
 			assert((trail_review.get("_fixed_bounds") as Rect2).is_equal_approx(Rect2(-480,-120,960,240)),"level 3 trail did not use a stable full-mission frame")
-		if mission_id == "level_3":
+		if mission_id == "level_2":
 			assert(text.contains("你是否注意到航点位置发生了偏移"),"level 3 awareness question was not event-specific")
 			assert(not text.contains("领航员放置航点后"),"level 3 review foregrounded an actor before responsibility allocation")
-		if mission_id == "level_4": assert(text.contains("你是否注意到飞船出现了横向偏移"),"level 4 awareness question was not event-specific")
-		if mission_id in ["level_3","level_4"]:
+		if mission_id == "level_3": assert(text.contains("你是否注意到飞船出现了横向偏移"),"level 3 awareness question was not event-specific")
+		if mission_id in ["level_2","level_3"]:
 			var screenshot := panel.find_child("MissionScreenshot",true,false) as Control
 			var screenshot_image := panel.find_child("MissionScreenshotImage",true,false) as TextureRect
 			assert(screenshot != null and screenshot.size.y>=95.0,"%s peak screenshot was too short to review" % mission_id)
@@ -117,7 +117,7 @@ func _check_allocator_for_all_four() -> void:
 		assert(str(answer.get("event_awareness",""))=="clear","%s did not save event awareness" % mission_id)
 		assert(_total(answer)==100 and int(answer.attribution_confidence)==6,"%s saved an invalid allocation" % mission_id)
 		assert((answer.item_display_order as Array)==first_order,"%s did not save item order" % mission_id)
-		assert(bool(answer.screenshot_available)==(mission_id in ["level_3","level_4"]),"%s screenshot applicability was wrong" % mission_id)
+		assert(bool(answer.screenshot_available)==(mission_id in ["level_2","level_3"]),"%s screenshot applicability was wrong" % mission_id)
 		assert(_all_text(panel).contains("正在进入下一部分"),"%s inserted a partner wait between questionnaires" % mission_id)
 		panel.free()
 	host.queue_free()
@@ -125,19 +125,19 @@ func _check_allocator_for_all_four() -> void:
 
 func _check_each_level_enters_allocator() -> void:
 	var game := root.get_node("Game")
-	for mission_id: String in ["level_3","level_4"]:
+	for mission_id: String in ["level_2","level_3"]:
 		game.session_mission_index = MissionCatalog.IDS.find(mission_id)
 		game.call("select_mission",mission_id)
 		game.call("store_event_review",mission_id,_record(mission_id))
-		if mission_id == "level_3": game.call("store_event_review","waypoint_drift",_record(mission_id))
-		if mission_id == "level_4": game.call("store_event_review","ship_shear",_record(mission_id))
+		if mission_id == "level_2": game.call("store_event_review","waypoint_drift",_record(mission_id))
+		if mission_id == "level_3": game.call("store_event_review","ship_shear",_record(mission_id))
 		var tracker: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 		root.add_child(tracker)
 		for i: int in range(5): await process_frame
 		tracker.set("_mission_outcome","完成")
 		tracker.set("_mission_summary",_summary(mission_id))
-		if mission_id=="level_3": tracker.set("_waypoint_drift_events",1)
-		if mission_id=="level_4": tracker.set("_ship_shear_events",1)
+		if mission_id=="level_2": tracker.set("_waypoint_drift_events",1)
+		if mission_id=="level_3": tracker.set("_ship_shear_events",1)
 		tracker.call("_show_mission_attribution_surveys")
 		await process_frame
 		assert(root.find_children("MissionAttribution_*","",true,false).size()==2,"%s did not open two allocators" % mission_id)
@@ -152,7 +152,7 @@ func _check_each_level_enters_allocator() -> void:
 		tracker.queue_free()
 		await process_frame
 
-func _levels() -> Array[String]: return ["level_1","level_2","level_3","level_4"]
+func _levels() -> Array[String]: return ["level_1","level_2","level_3"]
 
 func _host() -> Control:
 	var host := Control.new()
@@ -161,7 +161,7 @@ func _host() -> Control:
 	return host
 
 func _summary(mission_id: String) -> Dictionary:
-	return {"mission_id":mission_id,"outcome":"完成","success":true,"waypoint_drift_events":1 if mission_id=="level_3" else 0,"ship_shear_events":1 if mission_id=="level_4" else 0}
+	return {"mission_id":mission_id,"outcome":"完成","success":true,"waypoint_drift_events":1 if mission_id=="level_2" else 0,"ship_shear_events":1 if mission_id=="level_3" else 0}
 
 func _record(mission_id: String) -> Dictionary:
 	var image := Image.create(640,360,false,Image.FORMAT_RGB8)
@@ -169,25 +169,25 @@ func _record(mission_id: String) -> Dictionary:
 	return {
 		"event_id":"%s-review-1" % mission_id,"event_type":"mission_responsibility","mission_id":mission_id,"mission_label":_label(mission_id),
 		"elapsed":65.0,"outcome":"完成","success":true,"attempt_number":1,
-		"target_event_type":"waypoint_drift" if mission_id=="level_3" else ("ship_shear" if mission_id=="level_4" else null),
-		"target_event_exposed":true if mission_id in ["level_3","level_4"] else null,
-		"target_event_pulse_count":1 if mission_id in ["level_3","level_4"] else null,
-		"capture_kind":"target_peak" if mission_id in ["level_3","level_4"] else "none",
-		"views":{"D001A":{"role":"navigator","image":image},"D001B":{"role":"pilot","image":image},"navigator":{"role":"navigator","image":image},"pilot":{"role":"pilot","image":image}} if mission_id in ["level_3","level_4"] else {},
+		"target_event_type":"waypoint_drift" if mission_id=="level_2" else ("ship_shear" if mission_id=="level_3" else null),
+		"target_event_exposed":true if mission_id in ["level_2","level_3"] else null,
+		"target_event_pulse_count":1 if mission_id in ["level_2","level_3"] else null,
+		"capture_kind":"target_peak" if mission_id in ["level_2","level_3"] else "none",
+		"views":{"D001A":{"role":"navigator","image":image},"D001B":{"role":"pilot","image":image},"navigator":{"role":"navigator","image":image},"pilot":{"role":"pilot","image":image}} if mission_id in ["level_2","level_3"] else {},
 		"flight_trail":PackedVector2Array([Vector2(-40,12),Vector2(-10,4),Vector2(20,-6),Vector2(48,0)]),
 		"failed_flight_trails":[PackedVector2Array([Vector2(-40,12),Vector2(-25,22),Vector2(-18,30)])],
 		"collision_points":PackedVector2Array([Vector2(-18,30),Vector2(20,-6)]),
 		"flight_start":Vector2(-40,12),"flight_goal":Vector2(48,0),
-		"target_event_position":Vector2(20,-6) if mission_id in ["level_3","level_4"] else null,
-		"target_event_positions":PackedVector2Array([Vector2(20,-6)]) if mission_id in ["level_3","level_4"] else PackedVector2Array(),
+		"target_event_position":Vector2(20,-6) if mission_id in ["level_2","level_3"] else null,
+		"target_event_positions":PackedVector2Array([Vector2(20,-6)]) if mission_id in ["level_2","level_3"] else PackedVector2Array(),
 		"flight_world_bounds":Rect2(-480,-120,960,240),
 	}
 
 func _label(mission_id: String) -> String: return "正式任务 %02d" % MissionCatalog.IDS.find(mission_id)
 
 func _review_heading(mission_id: String) -> String:
-	if mission_id=="level_3": return "航点位置偏移"
-	if mission_id=="level_4": return "飞船横向偏移"
+	if mission_id=="level_2": return "航点位置偏移"
+	if mission_id=="level_3": return "飞船横向偏移"
 	return "本关航行表现"
 
 func _assert_two_images(record: Dictionary,label: String) -> void:

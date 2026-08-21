@@ -35,7 +35,7 @@
 
 ## 流程
 
-`标题` → `选关` → `认领岗位` → `飞行` → `自然结算` → 下一关。训练关增加操作理解检查；正式任务 03、04 在目标异常后的行为窗口完整结束后，才进入事件回顾、责任分配和状态评价。最后一关双方提交后进入 `感谢游玩`。
+`标题` → `选关` → `认领岗位` → `飞行` → `自然结算` → 下一关。训练关增加操作理解检查；正式任务 02、03 在目标异常后的行为窗口完整结束后，才进入事件回顾、责任分配和状态评价。最后一关双方提交后进入 `感谢游玩`。
 
 <p align="center">
   <img src="docs/readme/level_select.jpg" alt="选关页按顺序解锁任务" width="920">
@@ -49,17 +49,16 @@
 
 认领必须分清是屏幕 A 还是屏幕 B 点的。同一岗位不能被两边同时占住；点关闭可以退回重选。两边都认领后才能出发。
 
-## 五关
+## 四关
 
-每关只练一件协作问题。训练关短、开阔、不设中继站；后面四关按阶段横向展开，16:9 只是一次可见范围，不是整张地图。左边是关卡概念图，右边是玩家实际看到的全图星图。
+训练关短、开阔、不设中继站；正式任务 01 把绕环和错位航门合并为唯一正常协作基线，随后两关分别包含一种核心异常。16:9 只是一次可见范围，不是整张地图。左边是关卡概念图，右边是玩家实际看到的全图星图。
 
 | 关卡 | 概念图 | 实际星图 |
 | :---: | :---: | :---: |
 | **00 训练航道**<br>建立分工：短航点、冷却、跟随 | <img src="docs/readme/mission_practice.jpg" alt="训练航道概念图" width="280"> | <img src="docs/readme/map_practice.jpg" alt="训练航道星图" width="280"> |
-| **01 织环航道**<br>开阔进场后依次绕过三处环形尘带 | <img src="docs/readme/mission_level_1.jpg" alt="织环航道概念图" width="280"> | <img src="docs/readme/map_level_1.jpg" alt="织环航道星图" width="280"> |
-| **02 折光走廊**<br>连续通过四道错位航门，减速再转向 | <img src="docs/readme/mission_level_2.jpg" alt="折光走廊概念图" width="280"> | <img src="docs/readme/map_level_2.jpg" alt="折光走廊星图" width="280"> |
-| **03 寂井侧翼**<br>依次通过两段狭窄航道 | <img src="docs/readme/mission_level_3.jpg" alt="寂井侧翼概念图" width="280"> | <img src="docs/readme/map_level_3.jpg" alt="寂井侧翼星图" width="280"> |
-| **04 潮汐远航**<br>沿连续弯道分段规划并及时减速 | <img src="docs/readme/mission_level_4.jpg" alt="潮汐远航概念图" width="280"> | <img src="docs/readme/map_level_4.jpg" alt="潮汐远航星图" width="280"> |
+| **01 环门航道**<br>先绕过两处环形尘带，再通过三道错位航门 | <img src="docs/readme/mission_level_1.jpg" alt="环门航道概念图" width="280"> | <img src="docs/readme/map_level_1.jpg" alt="环门航道星图" width="280"> |
+| **02 寂井侧翼**<br>依次通过两段狭窄航道 | <img src="docs/readme/mission_level_2.jpg" alt="寂井侧翼概念图" width="280"> | <img src="docs/readme/map_level_2.jpg" alt="寂井侧翼星图" width="280"> |
+| **03 潮汐远航**<br>沿连续弯道分段规划并及时减速 | <img src="docs/readme/mission_level_3.jpg" alt="潮汐远航概念图" width="280"> | <img src="docs/readme/map_level_3.jpg" alt="潮汐远航星图" width="280"> |
 
 关卡设计理由、边界规则和小行星带不可直穿的检查见 [关卡设计](docs/mission_design.md)。审核路线只画在 `artifacts/maps/` 的开发图里，实验界面不会展示。
 
@@ -77,7 +76,7 @@
 | :---: | :---: |
 | <img src="docs/readme/attribution.jpg" alt="事件回顾与100分责任分配" width="440"> | <img src="docs/readme/survey.jpg" alt="事件后状态评价" width="440"> |
 
-最后一关（正式任务 04）双方都提交后，进入感谢页。可以从这里返回标题，或直接退出。
+最后一关（正式任务 03）双方都提交后，进入感谢页。可以从这里返回标题，或直接退出。
 
 <p align="center">
   <img src="docs/readme/thank_you.jpg" alt="感谢游玩页面" width="920">
@@ -140,7 +139,7 @@ tools/package_macos.sh
 
 ## 校验
 
-日常修改先跑关键回归；改地图时追加地图专项；正式打包前再跑完整回归。图形性能实测独立运行，单次启动会依次测完五关，并在异常卡顿时自动超时退出。
+日常修改先跑关键回归；改地图时追加地图专项；正式打包前再跑完整回归。图形性能实测独立运行，单次启动会依次测完四关，并在异常卡顿时自动超时退出。
 
 ```bash
 tools/validate_project.sh

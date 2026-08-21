@@ -150,7 +150,7 @@ func setup(role_name: String,stable_participant_id: String,mission_record: Dicti
 func _prepare_item_order() -> void:
 	_item_order.assign(ITEM_KEYS)
 	var rng := RandomNumberGenerator.new()
-	# 同一参与者四关保持相同顺序，参与者之间独立随机。
+	# 同一参与者在两次异常归因中保持相同顺序，参与者之间独立随机。
 	rng.seed = absi(hash("%s|%s|responsibility-order" % [Game.dyad_id,participant_id]))
 	for i: int in range(_item_order.size()-1,0,-1):
 		var j := rng.randi_range(0,i)
@@ -498,8 +498,7 @@ func _mission_label() -> String:
 	match str(_record.get("mission_id",Game.selected_mission_id)):
 		"level_1": return "正式任务 01"
 		"level_2": return "正式任务 02"
-		"level_3": return "正式任务 03"
-		_: return "正式任务 04"
+		_: return "正式任务 03"
 
 
 func _review_meta() -> String:

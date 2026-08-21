@@ -26,7 +26,7 @@ func _run() -> void:
 		print("FLOW_SCENE_OK %s nodes=%d" % [path, _count(page)])
 		page.queue_free(); await process_frame
 	var catalog = load("res://scripts/mission_catalog.gd")
-	assert(catalog.all().size() == 5, "mission count")
+	assert(catalog.all().size() == 4, "mission count")
 	print("FLOW_SMOKE_OK"); quit(0)
 
 func _count(node: Node) -> int:

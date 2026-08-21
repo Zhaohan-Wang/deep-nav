@@ -42,16 +42,14 @@ const SPACE_AMBIENCE: AudioStreamOggVorbis = preload("res://assets/audio/ambient
 const MISSION_MUSIC: Dictionary = {
 	"practice": preload("res://assets/audio/music/bgm_practice.ogg"),
 	"level_1": preload("res://assets/audio/music/bgm_level_1.ogg"),
-	"level_2": preload("res://assets/audio/music/bgm_level_2.ogg"),
-	"level_3": preload("res://assets/audio/music/bgm_level_3.ogg"),
-	"level_4": preload("res://assets/audio/music/bgm_level_4.ogg"),
+	"level_2": preload("res://assets/audio/music/bgm_level_3.ogg"),
+	"level_3": preload("res://assets/audio/music/bgm_level_4.ogg"),
 }
 const MISSION_MUSIC_DB: Dictionary = {
 	"practice": -11.0,
 	"level_1": -10.5,
-	"level_2": -10.0,
-	"level_3": -9.5,
-	"level_4": -9.0,
+	"level_2": -9.5,
+	"level_3": -9.0,
 }
 
 var _players: Array[AudioStreamPlayer] = []

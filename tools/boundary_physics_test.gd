@@ -64,7 +64,7 @@ func _check_guard_behavior(failures: PackedStringArray) -> void:
 	if game == null:
 		failures.append("Game autoload missing for boundary guard test")
 		return
-	game.call("select_mission","level_4")
+	game.call("select_mission","level_3")
 	var mission: SectorData = game.get("current_sector")
 	var wall := _boundary(mission)
 	var ship_scene := load("res://scenes/ship.tscn") as PackedScene

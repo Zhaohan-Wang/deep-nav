@@ -883,7 +883,7 @@ func _on_ship_exploded(world_pos: Vector3) -> void:
 		"revival":_mission_deaths,"x":world_pos.x,"z":world_pos.z,"elapsed":_mission_elapsed,
 	})
 	var target_exposed := _waypoint_drift_events > 0 or _ship_shear_events > 0
-	if Game.selected_mission_id in ["level_3","level_4"] and target_exposed:
+	if Game.selected_mission_id in ["level_2","level_3"] and target_exposed:
 		# 第一次有效暴露后的解体就是异常后果；自然结束本航段并进入事件回顾。
 		_prime_explosion_visual(world_pos)
 		_death_time = 0.0
@@ -900,7 +900,7 @@ func _on_ship_exploded(world_pos: Vector3) -> void:
 	if _mission_finishing:
 		_restarting = false
 		return
-	if Game.selected_mission_id in ["level_3","level_4"] and get_tree().current_scene != null:
+	if Game.selected_mission_id in ["level_2","level_3"] and get_tree().current_scene != null:
 		# 核心异常尚未发生：本次没有可评价事件，重新开始该关且保留下一次触发资格。
 		ExperimentLog.log_event("pre_target_failure_restart","system",{"elapsed":_mission_elapsed})
 		_restarting = false
@@ -1099,7 +1099,7 @@ func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> vo
 				"maximum_degrees":WAYPOINT_DRIFT_MAX_DEG,
 			})
 			# 只武装下一次领航点击；原始点击位置从不显示，直接生成偏移后的最终航点。
-			Game.arm_waypoint_drift(drift_angle,"level_3_disturbance_gate")
+			Game.arm_waypoint_drift(drift_angle,"level_2_disturbance_gate")
 		"ship_shear":
 			if _ship_shear_events > 0:
 				ExperimentLog.log_event("duplicate_target_event_suppressed","system",{"slot":slot,"gate_index":index})
@@ -1254,7 +1254,7 @@ func _capture_target_event_review(event_type: String,payload: Dictionary = {}) -
 			"retained_metric":float(previous_record.get("peak_metric",-1.0)),
 		})
 		return
-	var mission_label := "正式任务 03" if event_type == "waypoint_drift" else "正式任务 04"
+	var mission_label := "正式任务 02" if event_type == "waypoint_drift" else "正式任务 03"
 	Game.store_event_review(event_type,{
 		"event_type":event_type,
 		"event_id":str(payload.get("event_id",ExperimentLog.active_event_id())),
@@ -1325,10 +1325,10 @@ func _capture_mission_review(outcome: String,success: bool) -> void:
 	var mission_number := maxi(MissionCatalog.IDS.find(mission_id),1)
 	var target_type: Variant = null
 	var target_exposed: Variant = null
-	if mission_id == "level_3":
+	if mission_id == "level_2":
 		target_type = "waypoint_drift"
 		target_exposed = _waypoint_drift_events > 0
-	elif mission_id == "level_4":
+	elif mission_id == "level_3":
 		target_type = "ship_shear"
 		target_exposed = _ship_shear_events > 0
 	var target_record := Game.event_review(str(target_type)) if target_type != null else {}
@@ -1343,7 +1343,7 @@ func _capture_mission_review(outcome: String,success: bool) -> void:
 		"attempt_number":Game.current_mission_attempt_number(),
 		"target_event_type":target_type,
 		"target_event_exposed":target_exposed,
-		"target_event_pulse_count":_waypoint_drift_events if mission_id == "level_3" else _ship_shear_events,
+		"target_event_pulse_count":_waypoint_drift_events if mission_id == "level_2" else _ship_shear_events,
 		# 第一、二关评价整关，不展示意义不明的结尾截图。
 		"views":target_record.get("views",{}) if not target_record.is_empty() else {},
 		"capture_kind":target_record.get("capture_kind","none"),
@@ -1423,8 +1423,8 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	GameAudio.finish_mission_audio()
 	_mission_outcome = outcome
 	Engine.time_scale = 1.0
-	# 结果动画覆盖任务页之前，整理整关航迹；第三、四关同时挂接目标异常峰值画面。
-	if Game.selected_mission_id in ["level_1","level_2","level_3","level_4"]:
+	# 结果动画覆盖任务页之前，整理整关航迹；第二、三关同时挂接目标异常峰值画面。
+	if Game.selected_mission_id in ["level_1","level_2","level_3"]:
 		_capture_mission_review(outcome,success)
 	if not success:
 		# 时间耗尽才是失败条件；此时以完整爆炸反馈结束当前飞行。
@@ -1451,7 +1451,7 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	await _show_result_flow(outcome,success,summary)
 	if Game.selected_mission_id == "practice":
 		_show_surveys(outcome,summary)
-	elif Game.selected_mission_id in ["level_3","level_4"]:
+	elif Game.selected_mission_id in ["level_2","level_3"]:
 		var review := _required_review()
 		if review.is_empty():
 			_show_mission_attribution_surveys()
@@ -1544,20 +1544,20 @@ func _required_review() -> Dictionary:
 					"code":"training_comprehension",
 					"message":"至少一名参与者对操作规则选择了“不确定”或“否”。\n请实验员重新说明对应规则，再让两名参与者重做训练关。",
 				}
-	if Game.selected_mission_id in ["level_3","level_4"]:
-		var exposed := _waypoint_drift_events > 0 if Game.selected_mission_id == "level_3" else _ship_shear_events > 0
+	if Game.selected_mission_id in ["level_2","level_3"]:
+		var exposed := _waypoint_drift_events > 0 if Game.selected_mission_id == "level_2" else _ship_shear_events > 0
 		if not exposed:
 			return {
 				"code":"target_event_unexposed",
 				"message":"本关在结束前没有实际触发预设的目标异常，因此不能进入主要归因分析。\n请实验员确认后重试本关。",
 			}
-		var event_type := "waypoint_drift" if Game.selected_mission_id == "level_3" else "ship_shear"
+		var event_type := "waypoint_drift" if Game.selected_mission_id == "level_2" else "ship_shear"
 		if Game.event_review(event_type).is_empty():
 			return {
 				"code":"event_review_missing",
 				"message":"目标异常已经发生，但事件画面没有成功保存。\n请实验员确认后重试本关。",
 			}
-	if Game.selected_mission_id in ["level_1","level_2","level_3","level_4"]:
+	if Game.selected_mission_id in ["level_1","level_2","level_3"]:
 		if Game.event_review(Game.selected_mission_id).is_empty():
 			return {
 				"code":"mission_review_missing",

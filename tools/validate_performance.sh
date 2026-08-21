@@ -54,7 +54,7 @@ if [[ -s "$TIMEOUT_MARKER" ]]; then
 	exit 1
 fi
 
-if (( STATUS != 0 )) || ! rg -q -F 'RUNTIME_PERFORMANCE_OK missions=5 target_fps=120' "$RUN_LOG"; then
+if (( STATUS != 0 )) || ! rg -q -F 'RUNTIME_PERFORMANCE_OK missions=4 target_fps=120' "$RUN_LOG"; then
 	print -u2 "PERFORMANCE_VALIDATION_FAILED"
 	rg '^(PERF |RUNTIME_PERFORMANCE_)' "$RUN_LOG" >&2 || tail -100 "$RUN_LOG" >&2
 	tail -60 "$ENGINE_LOG" >&2

@@ -88,45 +88,45 @@ func _run() -> void:
 		_check(boundary_count == 1, "%s 必须恰有一个边界带" % mission.id)
 		# 实验关之间的空间语法也是实验控制的一部分，不能只换皮肤。
 		if mission.id == "level_1":
-			_check(open_ring_count >= 3 and spline_count == 0,
-				"level_1 必须保持多环绕行链基线，不能退化成走廊")
+			_check(open_ring_count == 2 and spline_count == 6,
+				"level_1 必须同时保留两处绕环和三道双脊航门")
 			_check(mission.disturbance_slots.is_empty(),
 				"level_1 基线关不得包含实验扰动")
-		if mission.id == "level_3":
+		if mission.id == "level_2":
 			_check(open_ring_count == 0 and spline_count == 4,
-				"level_3 必须保持两段双样条井廊，不能重新变成 level_1 的环带")
+				"level_2 必须保持两段双样条井廊，不能重新变成 level_1 的环带")
 			_check(mission.disturbance_slots == PackedStringArray(["waypoint_drift"]),
-				"level_3 必须只包含一次核心航点漂移")
+				"level_2 必须只包含一次核心航点漂移")
 			var blocker := _body(mission,"ring")
 			var rejoin_guard := _body(mission,"cinder")
 			var entry_star := _body(mission,"sol")
 			_check(blocker != null and blocker.kind == CelestialBodyData.Kind.HAZARD and blocker.world_radius >= 30.0,
-				"level_3 走廊出口缺少具有压迫尺度的阻断天体")
+				"level_2 走廊出口缺少具有压迫尺度的阻断天体")
 			_check(rejoin_guard != null and rejoin_guard.world_radius >= 16.0,
-				"level_3 立即回切缺少有碰撞意义的月体")
+				"level_2 立即回切缺少有碰撞意义的月体")
 			if entry_star != null:
 				var entry_points := PackedVector3Array()
 				for i: int in mini(5,mission.route_checkpoints.size()):
 					entry_points.append(mission.route_checkpoints[i])
 				var entry_gap := _distance_to_path(entry_star.world_position,entry_points)-entry_star.collision_radius
 				_check(entry_gap >= 8.0 and entry_gap <= 24.0,
-					"level_3 入口恒星必须形成可感知但可安全绕过的侧向压力（当前 %.1f u）" % entry_gap)
+					"level_2 入口恒星必须形成可感知但可安全绕过的侧向压力（当前 %.1f u）" % entry_gap)
 			if blocker != null and dest != null and not mission.safe_gate_points.is_empty():
 				var safe_gate := mission.safe_gate_points[0]
 				_check(_distance_to_segment(blocker.world_position,safe_gate,dest.world_position)
 					<= blocker.collision_radius + Game.SHIP_RADIUS,
-					"level_3 寂井没有真正截断安全门到终点的直线路径")
+					"level_2 寂井没有真正截断安全门到终点的直线路径")
 				_check(_route_progress(blocker.world_position,mission.route_checkpoints)
 					> _route_progress(safe_gate,mission.route_checkpoints) + 20.0,
-					"level_3 阻断天体必须位于事件安全门之后，不能污染即时归因段")
+					"level_2 阻断天体必须位于事件安全门之后，不能污染即时归因段")
 				if rejoin_guard != null:
 					var upper_bypass := blocker.world_position + Vector3(0.0,0.0,blocker.collision_radius + 8.0)
 					_check(_distance_to_segment(rejoin_guard.world_position,upper_bypass,dest.world_position)
 						<= rejoin_guard.collision_radius + Game.SHIP_RADIUS + 1.0,
-						"level_3 无声月没有限制最省事的立即回切")
-		if mission.id == "level_4":
-			_check(spline_count == 2,"level_4 必须由上下两条样条脊围成唯一波浪航槽")
-			_check(boundary != null,"level_4 缺少用于封死溜边路线的外圈")
+						"level_2 无声月没有限制最省事的立即回切")
+		if mission.id == "level_3":
+			_check(spline_count == 2,"level_3 必须由上下两条样条脊围成唯一波浪航槽")
+			_check(boundary != null,"level_3 缺少用于封死溜边路线的外圈")
 			if boundary != null:
 				for belt: BeltData in mission.belts:
 					if belt.is_boundary or belt.shape != BeltData.Shape.SPLINE: continue
@@ -134,7 +134,7 @@ func _run() -> void:
 						var endpoint:=belt.spline_point(t)
 						var closed_radius:=boundary.inner_radius-belt.spline_half_width(t)-Game.SHIP_RADIUS
 						_check(boundary.ellipse_factor(endpoint,closed_radius)>=1.0,
-							"level_4 的 %s 端头未接入外圈，仍可从上/下沿溜边" % belt.id)
+							"level_3 的 %s 端头未接入外圈，仍可从上/下沿溜边" % belt.id)
 		if boundary != null:
 			_check(boundary.outer_radius-boundary.inner_radius >= 10.0, "%s 连续边界墙过薄" % mission.id)
 			_check(boundary.boundary_segment_count() >= 96, "%s 连续边界墙细分不足" % mission.id)

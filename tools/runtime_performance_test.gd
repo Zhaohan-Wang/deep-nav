@@ -1,6 +1,6 @@
 extends SceneTree
 
-const MISSIONS: Array[String] = ["practice", "level_1", "level_2", "level_3", "level_4"]
+const MISSIONS: Array[String] = ["practice", "level_1", "level_2", "level_3"]
 const TARGET_FPS := 120.0
 const MIN_MEAN_FPS := 115.0
 const MAX_P95_FRAME_MS := 16.67

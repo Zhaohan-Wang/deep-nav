@@ -25,14 +25,14 @@ func _run() -> void:
 			_check(route_risk<=4.0,"%s 规划路线仍穿入危险带（%.1f u）" % [mission.id,route_risk])
 			_check(turns>=2,"%s 不需要至少两次有意义的转向" % mission.id)
 			_check(route_length/direct_length>=1.015,"%s 计划路线几乎就是直线" % mission.id)
-		if mission.id=="level_4":
+		if mission.id=="level_3":
 			var reversals:=_lateral_reversals(mission.route_checkpoints)
 			var lateral_span:=_lateral_span(mission.route_checkpoints)
 			var macro_bow:=_macro_bow(mission.route_checkpoints)
-			_check(reversals>=7,"level_4 波浪航槽不足 7 次反向弯折（当前 %d）" % reversals)
-			_check(lateral_span>=58.0,"level_4 波浪航槽横向摆幅不足（当前 %.1f u）" % lateral_span)
-			_check(absf(macro_bow)>=8.0,"level_4 只有局部波浪，没有贯穿全图的大弧线（当前 %.1f u）" % macro_bow)
-			_check(route_length/direct_length>=1.18,"level_4 路线迂回率不足（当前 %.3f）" % (route_length/direct_length))
+			_check(reversals>=7,"level_3 波浪航槽不足 7 次反向弯折（当前 %d）" % reversals)
+			_check(lateral_span>=58.0,"level_3 波浪航槽横向摆幅不足（当前 %.1f u）" % lateral_span)
+			_check(absf(macro_bow)>=8.0,"level_3 只有局部波浪，没有贯穿全图的大弧线（当前 %.1f u）" % macro_bow)
+			_check(route_length/direct_length>=1.18,"level_3 路线迂回率不足（当前 %.3f）" % (route_length/direct_length))
 		_check(body_clearance>=3.0,"%s 计划路线离实体天体过近（净空 %.1f u）" % [mission.id,body_clearance])
 		print("NAV_DIFFICULTY %s direct_risk=%.1f route_risk=%.1f detour=%.3f turns=%d body_clearance=%.1f" % [
 			mission.id,direct_risk,route_risk,route_length/direct_length,turns,body_clearance])

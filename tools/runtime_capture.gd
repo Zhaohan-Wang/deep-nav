@@ -85,7 +85,7 @@ func _capture() -> void:
 	for i: int in range(4): await process_frame
 	game.set("experiment_mode",false)
 	game.set("debug_mode",false)
-	game.call("select_mission","level_4")
+	game.call("select_mission","level_3")
 	var packed := load("res://scenes/main.tscn") as PackedScene
 	var scene := packed.instantiate()
 	root.add_child(scene)
@@ -165,10 +165,10 @@ func _capture() -> void:
 	await create_timer(0.25).timeout
 	if not _save_capture(OUT_BOUNDARY): quit(1); return
 
-	# 重新载入 Level 3，在真实 3D 驾驶视角检查双样条走廊，而不只看审核俯视图。
+	# 重新载入 Level 2，在真实 3D 驾驶视角检查双样条走廊，而不只看审核俯视图。
 	scene.queue_free()
 	for i: int in range(4): await process_frame
-	game.call("select_mission","level_3")
+	game.call("select_mission","level_2")
 	var level3_scene := packed.instantiate()
 	root.add_child(level3_scene)
 	for i: int in range(12): await process_frame
@@ -290,7 +290,7 @@ func _capture() -> void:
 	for survey: Control in surveys: survey.free()
 	level3_scene.queue_free()
 	for i: int in range(4): await process_frame
-	game.call("select_mission","level_4")
+	game.call("select_mission","level_3")
 	var level4_scene := packed.instantiate()
 	root.add_child(level4_scene)
 	for i: int in range(12): await process_frame

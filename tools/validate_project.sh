@@ -14,7 +14,7 @@ SUITE_STARTED=$SECONDS
 FAST_TESTS=(
 	"流程冒烟|res://tools/flow_smoke.gd|FLOW_SMOKE_OK"
 	"任务流程|res://tools/mission_flow_test.gd|MISSION_FLOW_OK"
-	"四关问卷|res://tools/four_mission_questionnaire_test.gd|FOUR_MISSION_QUESTIONNAIRE_OK"
+	"正式任务问卷|res://tools/four_mission_questionnaire_test.gd|FOUR_MISSION_QUESTIONNAIRE_OK"
 	"碎石带一致性|res://tools/belt_consistency_test.gd|BELT_CONSISTENCY_OK"
 	"碎石伤害|res://tools/asteroid_belt_gameplay_test.gd|ASTEROID_BELT_GAMEPLAY_OK"
 	"飞船转向|res://tools/ship_turning_test.gd|SHIP_TURNING_OK"
@@ -24,21 +24,21 @@ FAST_TESTS=(
 )
 
 MAP_TESTS=(
-	"关卡目录|res://tools/mission_audit.gd|MISSION_CATALOG_OK count=5"
+	"关卡目录|res://tools/mission_audit.gd|MISSION_CATALOG_OK count=4"
 	"边界封闭|res://tools/boundary_physics_test.gd|BOUNDARY_PHYSICS_OK"
-	"导航难度|res://tools/navigation_difficulty_test.gd|NAVIGATION_DIFFICULTY_OK missions=5"
+	"导航难度|res://tools/navigation_difficulty_test.gd|NAVIGATION_DIFFICULTY_OK missions=4"
 	"碎石带风险|res://tools/asteroid_belt_hazard_test.gd|ASTEROID_BELT_HAZARD_OK"
 )
 
 SPECIALTY_TESTS=(
-	"被试隐私|res://tools/participant_ui_privacy_test.gd|PARTICIPANT_UI_PRIVACY_OK missions=5"
+	"被试隐私|res://tools/participant_ui_privacy_test.gd|PARTICIPANT_UI_PRIVACY_OK missions=4"
 	"视觉资源|res://tools/visual_asset_test.gd|VISUAL_ASSET_OK"
 	"航点行为|res://tools/waypoint_behavior_test.gd|WAYPOINT_BEHAVIOR_OK"
 	"航点投影|res://tools/billboard_projection_test.gd|BILLBOARD_PROJECTION_OK"
 	"船体反馈|res://tools/hull_feedback_test.gd|HULL_RING_FEEDBACK_OK"
 	"实验视觉反馈|res://tools/experiment_visual_feedback_test.gd|EXPERIMENT_VISUAL_FEEDBACK_OK"
 	"岗位认领|res://tools/role_claim_test.gd|ROLE_CLAIM_OK"
-	"实验进度|res://tools/session_progress_test.gd|SESSION_PROGRESS_OK missions=5"
+	"实验进度|res://tools/session_progress_test.gd|SESSION_PROGRESS_OK missions=4"
 	"双鼠标分流|res://tools/raw_mouse_separation_test.gd|RAW_MOUSE_SEPARATION_OK slots=2 seats=2 cursors=independent"
 	"双键盘分流|res://tools/keyboard_seat_test.gd|KEYBOARD_SEAT_TEST_OK"
 	"音频系统|res://tools/audio_system_test.gd|AUDIO_SYSTEM_TEST_OK"
@@ -50,7 +50,7 @@ usage() {
 	print "  默认          只跑日常关键回归"
 	print "  --maps        再跑地图、边界和难度检查"
 	print "  --full        再跑全部专项回归（包含 --maps）"
-	print "  --performance 关键回归通过后实测五关帧率"
+	print "  --performance 关键回归通过后实测四关帧率"
 }
 
 for argument in "$@"; do
@@ -151,7 +151,7 @@ if [[ "$RUN_FULL" == true ]]; then
 fi
 
 if [[ "$RUN_PERFORMANCE" == true ]]; then
-	print "开始五关图形性能实测"
+	print "开始四关图形性能实测"
 	"$PROJECT_ROOT/tools/validate_performance.sh"
 fi
 

@@ -22,7 +22,7 @@ tools/validate_project.sh --maps
 # 正式打包前
 tools/validate_project.sh --full
 
-# 一次启动依次实测五关，目标 120 FPS；最长 45 秒自动退出
+# 一次启动依次实测四关，目标 120 FPS；最长 45 秒自动退出
 tools/validate_performance.sh
 
 # 需要一口气完成日常回归和性能实测时

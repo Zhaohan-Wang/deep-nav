@@ -1,6 +1,6 @@
 extends Node
 ## 全局游戏状态：当前扇区、飞船、航点、显示模式。
-## 关卡锁定只在实验模式生效；关掉实验模式后，五关都可以直接进、可重复玩。
+## 关卡锁定只在实验模式生效；关掉实验模式后，四关都可以直接进、可重复玩。
 
 const Catalog = preload("res://scripts/mission_catalog.gd")
 const RouteGateScript = preload("res://scripts/route_gate.gd")
@@ -69,7 +69,7 @@ var waypoint_max_distance: float = 72.0
 const SETTINGS_PATH := "user://settings.cfg"
 ## 每次需要参与者重新确认声音、动态效果和 macOS 权限说明时递增。
 const SETTINGS_REVISION: int = 2
-const EXPERIMENT_PROTOCOL_VERSION := "in-game-measures-4.2"
+const EXPERIMENT_PROTOCOL_VERSION := "in-game-measures-4.3"
 var settings_revision: int = 0
 var dyad_sequence: int = 0
 var dyad_id: String = ""

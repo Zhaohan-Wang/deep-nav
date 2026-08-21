@@ -32,7 +32,7 @@ func _run() -> void:
 		assert(visible_text.contains("任务规则"),"mission rules panel missing")
 	page.queue_free()
 	await process_frame
-	game.call("select_mission","level_4")
+	game.call("select_mission","level_3")
 	var main_packed := load("res://scenes/main.tscn") as PackedScene
 	var main_page := main_packed.instantiate()
 	root.add_child(main_page)
@@ -50,7 +50,7 @@ func _run() -> void:
 	var debug_page := packed.instantiate()
 	root.add_child(debug_page)
 	await process_frame
-	debug_page.call("_select",catalog.by_id("level_3"))
+	debug_page.call("_select",catalog.by_id("level_2"))
 	await process_frame
 	var debug_text := _all_text(debug_page)
 	assert(debug_text.contains("RESEARCH DEBUG"),"researcher diagnostics missing")

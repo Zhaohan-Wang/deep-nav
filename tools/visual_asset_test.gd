@@ -11,7 +11,6 @@ const MISSION_PREVIEWS: PackedStringArray = [
 	"res://assets/ui/mission_previews/level_1.jpg",
 	"res://assets/ui/mission_previews/level_2.jpg",
 	"res://assets/ui/mission_previews/level_3.jpg",
-	"res://assets/ui/mission_previews/level_4.jpg",
 ]
 
 

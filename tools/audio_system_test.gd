@@ -49,7 +49,7 @@ func _run() -> void:
 	assert(ambient != null and ambient.stream is AudioStreamOggVorbis, "ambient player missing")
 	assert((ambient.stream as AudioStreamOggVorbis).loop, "space ambience must loop")
 
-	audio.call("start_mission_audio", "level_4")
+	audio.call("start_mission_audio", "level_3")
 	assert(music.playing and ambient.playing, "mission music layers did not start")
 	var far_volume := ambient.volume_db
 	for _i: int in 20:
