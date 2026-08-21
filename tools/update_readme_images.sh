@@ -36,10 +36,13 @@ map_image() {
 	local mission="$1"
 	local source_path="$overview_dir/$mission.png"
 	local cropped_path="$temp_dir/map-$mission-cropped.png"
+	local source_width crop_height
 
 	test -f "$source_path" || { print -u2 "Missing map overview: $source_path"; return 1; }
-	# 双屏采集在部分 Mac 上会把 16:9 角色画面放进纵向双倍缓冲区；取中央完整地图区域。
-	sips -c 972 1728 "$source_path" --out "$cropped_path" >/dev/null
+	# 单屏/双屏采集宽度不同，但中央都保留完整的 16:9 地图区域。
+	source_width="$(sips -g pixelWidth "$source_path" | awk '/pixelWidth/ {print $2}')"
+	crop_height=$((source_width * 9 / 16))
+	sips -c "$crop_height" "$source_width" "$source_path" --out "$cropped_path" >/dev/null
 	sips -z 900 1600 -s format jpeg -s formatOptions 88 "$cropped_path" --out "$output_dir/map_$mission.jpg" >/dev/null
 }
 
