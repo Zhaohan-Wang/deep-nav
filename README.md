@@ -24,24 +24,24 @@
 
 | 操作 | 作用 |
 | --- | --- |
-| 星图左键 | 放置航点（冷却 2 秒，最大距离 72 世界单位） |
+| 星图左键 | 放置航点（正式实验冷却 4 秒，最大距离 72 世界单位） |
 | 驾驶员所在席位的 `W A S D` | 推进 / 刹车 / 转向 |
 | 领航员所在席位的 `E` | 升起或降下星图 |
 | `R` | 重置当前飞行 |
 | `F4` | 交换两块屏上的岗位画面 |
 | `F6` | 只校正鼠标与屏幕对应关系，不交换键盘 |
 
-航点不能丢到边界排斥区外。解体不会直接结束任务：训练关回起点，正式关回到最近一座已抵达的**中继站**。时限耗尽才判负。
+航点不能丢到边界排斥区外。目标异常发生前解体时，训练关回起点，正式关回到最近一座已抵达的**中继站**；目标异常发生后解体则自然结束当前航段，先展示失败结果，再进入事件评价。时限耗尽也会判负。
 
 ## 流程
 
-`标题` → `选关` → `认领岗位` → `飞行` → `结算` → `量表` → 下一关；第五关量表提交后进入 `感谢游玩`
+`标题` → `选关` → `认领岗位` → `飞行` → `自然结算` → 下一关。训练关增加操作理解检查；正式任务 03、04 在目标异常后的行为窗口完整结束后，才进入事件回顾、责任分配和状态评价。最后一关双方提交后进入 `感谢游玩`。
 
 <p align="center">
   <img src="docs/readme/level_select.jpg" alt="选关页按顺序解锁任务" width="920">
 </p>
 
-进度只存在本次运行的内存里。从标题页重新开始，或退出后再进，都会从训练关归零。当前关无论成功、超时还是其他结果，填完量表后就会锁住，只能进入下一关。
+进度只存在本次运行的内存里。从标题页重新开始，或退出后再进，都会从训练关归零。关卡完成后按顺序解锁；需要事件评价的关卡由双方各自提交后进入下一关。
 
 <p align="center">
   <img src="docs/readme/role_claim.jpg" alt="两屏分别认领领航员与驾驶员" width="920">
@@ -56,16 +56,16 @@
 | 关卡 | 概念图 | 实际星图 |
 | :---: | :---: | :---: |
 | **00 训练航道**<br>建立分工：短航点、冷却、跟随 | <img src="docs/readme/mission_practice.jpg" alt="训练航道概念图" width="280"> | <img src="docs/readme/map_practice.jpg" alt="训练航道星图" width="280"> |
-| **01 织环航道**<br>开阔进场后绕过单一环带 | <img src="docs/readme/mission_level_1.jpg" alt="织环航道概念图" width="280"> | <img src="docs/readme/map_level_1.jpg" alt="织环航道星图" width="280"> |
-| **02 折光走廊**<br>两段错位碎石门，减速再转向 | <img src="docs/readme/mission_level_2.jpg" alt="折光走廊概念图" width="280"> | <img src="docs/readme/map_level_2.jpg" alt="折光走廊星图" width="280"> |
-| **03 寂井侧翼**<br>单一校准走廊，导航读数可能异常 | <img src="docs/readme/mission_level_3.jpg" alt="寂井侧翼概念图" width="280"> | <img src="docs/readme/map_level_3.jpg" alt="寂井侧翼星图" width="280"> |
-| **04 潮汐远航**<br>先建立稳定节奏，再在剪切后恢复 | <img src="docs/readme/mission_level_4.jpg" alt="潮汐远航概念图" width="280"> | <img src="docs/readme/map_level_4.jpg" alt="潮汐远航星图" width="280"> |
+| **01 织环航道**<br>开阔进场后依次绕过三处环形尘带 | <img src="docs/readme/mission_level_1.jpg" alt="织环航道概念图" width="280"> | <img src="docs/readme/map_level_1.jpg" alt="织环航道星图" width="280"> |
+| **02 折光走廊**<br>连续通过四道错位航门，减速再转向 | <img src="docs/readme/mission_level_2.jpg" alt="折光走廊概念图" width="280"> | <img src="docs/readme/map_level_2.jpg" alt="折光走廊星图" width="280"> |
+| **03 寂井侧翼**<br>依次通过两段狭窄航道 | <img src="docs/readme/mission_level_3.jpg" alt="寂井侧翼概念图" width="280"> | <img src="docs/readme/map_level_3.jpg" alt="寂井侧翼星图" width="280"> |
+| **04 潮汐远航**<br>沿连续弯道分段规划并及时减速 | <img src="docs/readme/mission_level_4.jpg" alt="潮汐远航概念图" width="280"> | <img src="docs/readme/map_level_4.jpg" alt="潮汐远航星图" width="280"> |
 
 关卡设计理由、边界规则和小行星带不可直穿的检查见 [关卡设计](docs/mission_design.md)。审核路线只画在 `artifacts/maps/` 的开发图里，实验界面不会展示。
 
 ## 结算与量表
 
-任务结束先看结果图，再各自完成责任分配，并分别评价搭档、领航系统和飞船控制系统。目标异常关只客观回顾发生了什么，不在评分页重复具体原因或原因不明。量表用平铺选项和圆形滑钮，不用下拉弹窗，避免挡住虚拟光标。
+目标异常发生时不中断航行。系统继续记录应对与恢复行为，直到抵达安全点，或航段因成功、解体、超时而自然结束。随后先展示带事故画面的结果回顾，再由两名参与者独立完成异常觉察、100 分责任分配、判断信心与简短状态评价。回顾只陈述可观察事实，不用引导性语言重复异常成因。
 
 量表的构念、角色分流、成功/失败处理和新旧字段见 [关末量表重构说明](docs/questionnaire_redesign.md)。
 
@@ -73,11 +73,11 @@
 | :---: | :---: |
 | <img src="docs/readme/result_success.jpg" alt="任务成功结算" width="440"> | <img src="docs/readme/result_failure.jpg" alt="任务失败结算" width="440"> |
 
-<p align="center">
-  <img src="docs/readme/survey.jpg" alt="任务结束量表第一页" width="720">
-</p>
+| 事件回顾与责任分配 | 状态评价 |
+| :---: | :---: |
+| <img src="docs/readme/attribution.jpg" alt="事件回顾与100分责任分配" width="440"> | <img src="docs/readme/survey.jpg" alt="事件后状态评价" width="440"> |
 
-第五关双方都提交后，进入感谢页。可以从这里返回标题，或直接退出。
+最后一关（正式任务 04）双方都提交后，进入感谢页。可以从这里返回标题，或直接退出。
 
 <p align="center">
   <img src="docs/readme/thank_you.jpg" alt="感谢游玩页面" width="920">
@@ -85,7 +85,7 @@
 
 ## 实验数据
 
-标题页打开 **实验模式** 再点开始，先输入数字组号，再建立只追加、不覆盖的 session。奇数组使用明确成因提示，偶数组只显示客观异常；A/B 屏幕侧每四组翻转一次，避免条件和固定屏幕混淆。调试模式不会混入正式样本。
+标题页打开 **实验模式** 再点开始，先输入数字组号，再建立只追加、不覆盖的 session。每组开始时按 1:1 随机分配明确成因提示或模糊原因提示，组号只作为稳定样本编号，不决定实验条件；A/B 屏幕侧每四组翻转一次，避免条件和固定屏幕混淆。调试模式不会混入正式样本。
 
 数据写在游戏可写目录：
 
@@ -98,9 +98,14 @@ macOS 上大致对应：
 
 `raw/` 里有：
 
-- `session.csv`：会话元数据
-- `events.csv`：双方航点、碰撞、中继站、扰动提示、任务结束、量表提交
+- `sessions.csv`：会话、组号、随机条件和屏幕平衡信息
+- `missions.csv`：每次航段的开始、结果和任务汇总
+- `target_events.csv`：唯一核心异常、触发位置、实际生效和恢复窗口
+- `ratings.csv`：与 `event_id` 连接的异常觉察、责任分配和状态评价
+- `waypoints.csv`：每次航点请求、冷却、接受结果和修正记录
+- `events.csv`：碰撞、中继站、系统提示、任务结束等离散事件
 - `frames.csv`：每个物理帧的双方席位、光标、按键、驾驶输入和飞船状态
+- `quality_report.json`：会话结束时生成的数据完整性检查
 
 CSV 磁盘写入不在游戏主循环中执行。详细分组规则、字段和现场检查见 [实验数据说明](docs/experiment_data.md)。
 
@@ -150,6 +155,8 @@ tools/validate_performance.sh
 DEEP_NAV_VALIDATION_OK
 PERFORMANCE_VALIDATION_OK
 ```
+
+GitHub 展示图必须使用当前版本的真实运行截图，不能继续沿用旧版领航员、驾驶员或关卡画面。完成界面或地图调整并生成 `artifacts/runtime/` 与 `artifacts/star_map_overviews/` 后，运行 `tools/update_readme_images.sh`，再逐张检查裁切和文字清晰度后提交。
 
 ## 架构
 
