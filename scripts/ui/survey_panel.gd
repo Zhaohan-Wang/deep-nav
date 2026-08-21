@@ -1,10 +1,11 @@
 class_name SurveyPanel
 extends Control
-## 训练关只做操作理解；正式关在责任分配之后测量三类对象的即时状态信任。
+## 训练关做操作理解；正常关测基线状态；异常关在责任分配后测即时状态信任。
 
 signal submitted(role: String, answers: Dictionary)
 
 const INSTRUMENT_VERSION := "post-attribution-state-4.2"
+const BASELINE_INSTRUMENT_VERSION := "baseline-state-1.0"
 const NAVIGATOR_TRAINING_ITEMS: Array[Array] = [
 	["我知道如何在自己的星图上用鼠标设置航点。","navigator_can_place_waypoint"],
 	["我知道可以按 E 键打开或关闭完整星图。","navigator_knows_map_toggle"],
@@ -45,9 +46,13 @@ func setup(role_name: String,outcome_name: String,summary: Dictionary) -> void:
 	_mission_id = str(_summary.get("mission_id",Game.selected_mission_id))
 	_page_ids = ["training"] if _mission_id == "practice" else _trust_order()
 	_started_ms = Time.get_ticks_msec()
+	var is_training := _mission_id == "practice"
+	var is_baseline := _mission_id == "level_1"
 	_answers = {
-		"instrument_version":"training-role-comprehension-4.1" if _mission_id=="practice" else INSTRUMENT_VERSION,
-		"questionnaire_variant":"training_comprehension" if _mission_id=="practice" else "post_attribution_state",
+		"instrument_version":("training-role-comprehension-4.1" if is_training else
+			(BASELINE_INSTRUMENT_VERSION if is_baseline else INSTRUMENT_VERSION)),
+		"questionnaire_variant":("training_comprehension" if is_training else
+			("baseline_state" if is_baseline else "post_attribution_state")),
 		"mission_id":_mission_id,
 		"outcome_success":bool(_summary.get("success",false)),
 		"trust_block_order":_page_ids.duplicate() if _mission_id!="practice" else [],
@@ -75,10 +80,13 @@ func _build() -> void:
 	var style := AppStyle.box(AppStyle.PANEL,Color("29435a"),2); style.content_margin_top=14; style.content_margin_bottom=14; card.add_theme_stylebox_override("panel",style); safe.add_child(card)
 	var shell := VBoxContainer.new(); shell.add_theme_constant_override("separation",8); card.add_child(shell)
 	var header := HBoxContainer.new(); shell.add_child(header)
-	var title_text := "操作理解检查" if _mission_id=="practice" else "当前状态评价"
+	var title_text := ("操作理解检查" if _mission_id=="practice" else
+		("基线状态评价" if _mission_id=="level_1" else "当前状态评价"))
 	var title := AppStyle.label("%s · %s" % [title_text,_role_text()],24,AppStyle.CYAN); title.size_flags_horizontal=Control.SIZE_EXPAND_FILL; header.add_child(title)
 	_step_label=AppStyle.label("",17,AppStyle.AMBER); header.add_child(_step_label)
-	var privacy_text := "请根据刚才的练习回答。" if _mission_id=="practice" else "责任分配已完成。请根据刚才的航行回答以下问题；你的答案不会向搭档展示。"
+	var privacy_text := ("请根据刚才的练习回答。" if _mission_id=="practice" else
+		("请根据刚才的正常航行回答；你的答案不会向搭档展示。" if _mission_id=="level_1" else
+		"责任分配已完成。请根据刚才的航行回答以下问题；你的答案不会向搭档展示。"))
 	var privacy := AppStyle.label(privacy_text,14,AppStyle.MUTED); privacy.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; shell.add_child(privacy)
 	shell.add_child(HSeparator.new())
 	_page_host=VBoxContainer.new(); _page_host.name="SurveyPageHost"; _page_host.size_flags_vertical=Control.SIZE_EXPAND_FILL; _page_host.add_theme_constant_override("separation",8); shell.add_child(_page_host)

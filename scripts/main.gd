@@ -89,9 +89,17 @@ var _nav_arm_offset: Vector3 = Vector3.ZERO
 var _camera_probe: SphereShape3D
 var _camera_probe_query: PhysicsShapeQueryParameters3D
 var _mission_elapsed: float = 0.0
+var _active_gameplay_elapsed: float = 0.0
+var _mission_terminal_session_ms: float = 0.0
 var _mission_deaths: int = 0
 var _mission_hits: int = 0
 var _mission_waypoints: int = 0
+var _mission_waypoint_requests: int = 0
+var _mission_rejected_waypoints: int = 0
+var _mission_damage_taken: float = 0.0
+var _last_hull_for_damage: float = Game.MAX_HULL
+var _mission_path_length: float = 0.0
+var _path_last_position: Vector3 = Vector3.ZERO
 var _severe_heading_deviations: int = 0
 var _heading_deviation_candidate_s: float = 0.0
 var _heading_deviation_active: bool = false
@@ -113,6 +121,7 @@ var _target_event_record: Dictionary = {}
 var _target_event_written := false
 var _target_event_elapsed_s := 0.0
 var _target_event_gate_index := -1
+var _target_recovery_hold_s := 0.0
 var _active_waypoint_record: Dictionary = {}
 var _waypoint_elapsed_s := 0.0
 var _alignment_hold_s := 0.0
@@ -154,6 +163,8 @@ func _ready() -> void:
 	Game.mission_elapsed_s = 0.0
 	Game.mission_time_limit_s = Game.current_sector.time_limit_s if Game.current_sector != null else 0.0
 	Game.mission_timer_active = _mission_timer_enabled()
+	_last_hull_for_damage = Game.hull
+	_path_last_position = Game.ship_position
 	_flight_trail.append(_world_to_trail(Game.ship_position))
 	if Game.current_sector != null:
 		GameAudio.start_mission_audio(Game.current_sector.id)
@@ -201,12 +212,17 @@ func _process(delta: float) -> void:
 	_pilot_camera.rotation_degrees.z = shake.x * 4.5
 	_apply_ship_focus(_nav_camera, _nav_fog_mat, _nav_camera.global_position.distance_to(_ship.global_position) + NAV_FOCUS_PADDING)
 	_apply_ship_focus(_pilot_camera, _pilot_fog_mat, PILOT_FOCUS_AHEAD)
-	if not _mission_ended and not _mission_finishing and _mission_timer_enabled():
-		_mission_elapsed += delta
-		Game.mission_elapsed_s = _mission_elapsed
-		if _mission_elapsed >= Game.current_sector.time_limit_s:
-			_mission_elapsed = Game.current_sector.time_limit_s
-			_begin_mission_end("超时未完成",false)
+	if not _mission_ended and not _mission_finishing:
+		# 训练关虽然不显示倒计时，仍需保留真实有效操作时长；短暂慢动作也不能让实验时钟变慢。
+		var active_delta := delta/maxf(Engine.time_scale,0.05)
+		if Game.ship_alive and not _restarting:
+			_active_gameplay_elapsed += active_delta
+		if _mission_timer_enabled():
+			_mission_elapsed += active_delta
+			Game.mission_elapsed_s = _mission_elapsed
+			if _mission_elapsed >= Game.current_sector.time_limit_s:
+				_mission_elapsed = Game.current_sector.time_limit_s
+				_begin_mission_end("超时未完成",false)
 
 
 func _physics_process(delta: float) -> void:
@@ -215,46 +231,141 @@ func _physics_process(delta: float) -> void:
 	_track_severe_heading_deviation(delta)
 	_sample_flight_trail(delta)
 	var active_delta := delta/maxf(Engine.time_scale,0.05)
+	_update_mission_path_length()
 	_update_waypoint_response(active_delta)
 	_update_target_event_window(active_delta)
 	ExperimentLog.sample_frame()
 
 
-func _update_waypoint_response(_delta: float) -> void:
-	# 详细航点响应由逐帧原始数据保留；没有活动追踪窗口时无需额外汇总。
+func _update_mission_path_length() -> void:
+	var current := Game.ship_position
+	if (_mission_ended or _mission_finishing or _restarting or not Game.ship_alive):
+		_path_last_position = current
+		return
+	var step := current.distance_to(_path_last_position)
+	# 复活和场景初始化造成的是位置跳转，不是玩家实际飞过的路径。
+	if step <= 25.0:
+		_mission_path_length += step
+	_path_last_position = current
+
+
+func _current_waypoint_heading_error_deg() -> float:
+	if not Game.has_waypoint:
+		return -1.0
+	var to_waypoint := Game.waypoint-Game.ship_position
+	to_waypoint.y = 0.0
+	if to_waypoint.length_squared() <= 0.0001:
+		return -1.0
+	return rad_to_deg(absf(wrapf(atan2(-to_waypoint.x,-to_waypoint.z)-Game.ship_heading,-PI,PI)))
+
+
+func _current_route_cross_track_error() -> float:
+	if Game.current_sector == null:
+		return -1.0
+	var route := Game.current_sector.route_checkpoints
+	if route.size() < 2:
+		return -1.0
+	var nearest := INF
+	for i: int in range(route.size()-1):
+		var a: Vector3 = route[i]
+		var ab: Vector3 = route[i+1]-a
+		var t := clampf((Game.ship_position-a).dot(ab)/maxf(ab.length_squared(),0.0001),0.0,1.0)
+		nearest = minf(nearest,Game.ship_position.distance_to(a+ab*t))
+	return nearest if nearest<INF else -1.0
+
+
+func _update_waypoint_response(delta: float) -> void:
 	if _active_waypoint_record.is_empty():
 		return
+	_waypoint_elapsed_s += delta
+	_active_waypoint_record["response_window_observed_ms"] = _waypoint_elapsed_s*1000.0
+	var heading_error := _current_waypoint_heading_error_deg()
+	if heading_error >= 0.0:
+		_last_waypoint_heading_error = heading_error
+		if (_waypoint_elapsed_s >= 3.0
+				and not _active_waypoint_record.has("heading_error_reduction_3s_deg")):
+			_active_waypoint_record["heading_error_reduction_3s_deg"] = (
+				float(_active_waypoint_record.get("initial_heading_error_deg",heading_error))-heading_error
+			)
+		if heading_error <= 20.0:
+			_alignment_hold_s += delta
+			if (_alignment_hold_s >= 0.4
+					and not _active_waypoint_record.has("time_to_alignment_20deg_ms")):
+				_active_waypoint_record["time_to_alignment_20deg_ms"] = maxf(0.0,_waypoint_elapsed_s-_alignment_hold_s)*1000.0
+		else:
+			_alignment_hold_s = 0.0
+	if not _active_waypoint_record.has("waypoint_response_latency_ms"):
+		var initial_turn := float(_active_waypoint_record.get("initial_pilot_turn",0.0))
+		var initial_thrust := float(_active_waypoint_record.get("initial_pilot_thrust",0.0))
+		if (absf(Displays.pilot_turn_axis()-initial_turn)>=0.15
+				or absf(Displays.pilot_thrust_axis()-initial_thrust)>=0.15):
+			_active_waypoint_record["waypoint_response_latency_ms"] = _waypoint_elapsed_s*1000.0
+
+
+func _finalize_active_waypoint(status: String,overridden: bool = false) -> void:
+	if _active_waypoint_record.is_empty():
+		return
+	_active_waypoint_record["response_window_observed_ms"] = _waypoint_elapsed_s*1000.0
+	_active_waypoint_record["waypoint_override"] = overridden
+	_active_waypoint_record["completion_status"] = status
+	ExperimentLog.record_waypoint(_active_waypoint_record)
+	_active_waypoint_record = {}
+	_waypoint_elapsed_s = 0.0
+	_alignment_hold_s = 0.0
+	_override_hold_s = 0.0
+	_last_waypoint_heading_error = 0.0
 
 
 func _update_target_event_window(_delta: float) -> void:
 	if _target_event_record.is_empty() or _target_event_written:
 		return
 	_target_event_elapsed_s += _delta
-	_target_event_record["window_observed_ms"] = _target_event_elapsed_s*1000.0
-	var heading_error := 0.0
-	if Game.has_waypoint:
-		var to_waypoint := Game.waypoint-Game.ship_position
-		to_waypoint.y = 0.0
-		if to_waypoint.length_squared()>0.0001:
-			heading_error = rad_to_deg(absf(wrapf(atan2(-to_waypoint.x,-to_waypoint.z)-Game.ship_heading,-PI,PI)))
-	_target_event_record["max_heading_error_deg_15s"] = maxf(float(_target_event_record.get("max_heading_error_deg_15s",0.0)),heading_error)
+	_target_event_record["window_observed_ms"] = minf(_target_event_elapsed_s,15.0)*1000.0
+	# 15 秒分析窗结束后仍保留事件记录，直到安全门或关卡自然结束，以免丢失到达安全点时间。
+	if _target_event_elapsed_s > 15.0:
+		if not bool(_target_event_record.get("analysis_window_complete",false)):
+			_target_event_record["analysis_window_complete"] = true
+			_target_event_record["disintegrated_15s"] = not Game.ship_alive
+		return
+	var heading_error := _current_waypoint_heading_error_deg()
+	if heading_error >= 0.0:
+		_target_event_record["max_heading_error_deg_15s"] = maxf(float(_target_event_record.get("max_heading_error_deg_15s",0.0)),heading_error)
+		for sample_s: int in [3,5]:
+			var key := "heading_error_reduction_%ds_deg" % sample_s
+			if _target_event_elapsed_s >= sample_s and not _target_event_record.has(key):
+				_target_event_record[key] = float(_target_event_record.get("heading_error_at_onset_deg",heading_error))-heading_error
+	var cross_track_error := _current_route_cross_track_error()
+	if cross_track_error >= 0.0:
+		_target_event_record["max_cross_track_error_15s"] = maxf(
+			float(_target_event_record.get("max_cross_track_error_15s",0.0)),cross_track_error
+		)
 	if not _target_event_record.has("pilot_response_latency_ms") and (
-		absf(Displays.pilot_turn_axis())>0.12 or absf(Displays.pilot_thrust_axis())>0.12
+		absf(Displays.pilot_turn_axis()-float(_target_event_record.get("pilot_turn_at_onset",0.0)))>=0.15
+		or absf(Displays.pilot_thrust_axis()-float(_target_event_record.get("pilot_thrust_at_onset",0.0)))>=0.15
 	):
 		_target_event_record["pilot_response_latency_ms"] = _target_event_elapsed_s*1000.0
-	if not bool(_target_event_record.get("recovered_within_window",false)) and heading_error <= 20.0 and Game.ship_speed <= 18.0:
-		_target_event_record["recovered_within_window"] = true
-		_target_event_record["recovery_time_ms"] = _target_event_elapsed_s*1000.0
+	if heading_error >= 0.0 and heading_error <= 20.0 and Game.ship_speed <= 18.0:
+		_target_recovery_hold_s += _delta
+		if (not bool(_target_event_record.get("recovered_within_window",false))
+				and _target_event_elapsed_s >= 0.5 and _target_recovery_hold_s >= 1.0):
+			_target_event_record["recovered_within_window"] = true
+			_target_event_record["recovery_time_ms"] = maxf(0.0,_target_event_elapsed_s-_target_recovery_hold_s)*1000.0
+	else:
+		_target_recovery_hold_s = 0.0
 	_target_event_record["damage_events_15s"] = _mission_hits-int(_target_event_record.get("hits_at_onset",_mission_hits))
 	_target_event_record["hull_loss_15s"] = maxf(0.0,float(_target_event_record.get("hull_at_onset",Game.hull))-Game.hull)
 	if _target_event_elapsed_s >= 15.0:
-		_finalize_target_event("window_complete")
+		_target_event_record["analysis_window_complete"] = true
+		_target_event_record["disintegrated_15s"] = not Game.ship_alive
 
 
 func _finalize_target_event(outcome: String) -> void:
 	if _target_event_record.is_empty() or _target_event_written: return
 	_target_event_record["outcome"] = outcome
-	_target_event_record["disintegrated_15s"] = not Game.ship_alive
+	if not _target_event_record.has("disintegrated_15s"):
+		_target_event_record["disintegrated_15s"] = not Game.ship_alive and _target_event_elapsed_s<=15.0
+	_target_event_record["collision_within_15s"] = int(_target_event_record.get("damage_events_15s",0)) > 0
+	_target_event_record["explosion_within_15s"] = bool(_target_event_record.get("disintegrated_15s",false))
 	var details := _target_event_record.get("details",{}) as Dictionary
 	if _target_event_record.has("pilot_response_latency_ms"):
 		details["pilot_response_latency_ms"] = _target_event_record.pilot_response_latency_ms
@@ -263,6 +374,7 @@ func _finalize_target_event(outcome: String) -> void:
 	_target_event_record["details"] = details
 	ExperimentLog.record_target_event(_target_event_record)
 	_target_event_written = true
+	_target_recovery_hold_s = 0.0
 	ExperimentLog.clear_active_target_event()
 	ExperimentLog.advance_segment()
 
@@ -404,6 +516,7 @@ func _restart_current_mission() -> void:
 		"action": "restart_mission",
 		"elapsed": _mission_elapsed,
 	})
+	_record_aborted_mission("manual_restart")
 	Game.reset_run()
 	get_tree().reload_current_scene()
 
@@ -415,6 +528,7 @@ func _return_to_level_select() -> void:
 		"action": "return_level_select",
 		"elapsed": _mission_elapsed,
 	})
+	_record_aborted_mission("return_level_select")
 	Game.reset_run()
 	get_tree().change_scene_to_file("res://scenes/level_select.tscn")
 
@@ -426,6 +540,7 @@ func _return_to_title() -> void:
 		"action": "return_title",
 		"elapsed": _mission_elapsed,
 	})
+	_record_aborted_mission("return_title")
 	ExperimentLog.close_session()
 	Game.clear_experiment_setup()
 	Game.reset_run()
@@ -441,6 +556,44 @@ func _prepare_pause_scene_transition() -> bool:
 	Game.set_view_mode(Game.ViewMode.SPLIT)
 	Displays.show_shared_page()
 	return true
+
+
+func _mission_direct_distance() -> float:
+	if Game.current_sector == null:
+		return 0.0
+	var route := Game.current_sector.route_checkpoints
+	if route.size() >= 2:
+		return route[0].distance_to(route[route.size()-1])
+	if Game.objective_body() != null:
+		return Game.current_sector.spawn_position.distance_to(Game.objective_body().world_position)
+	return 0.0
+
+
+func _record_aborted_mission(reason: String) -> void:
+	if _mission_ended or _mission_finishing:
+		return
+	_mission_finishing = true
+	_mission_terminal_session_ms = ExperimentLog.session_elapsed_ms()
+	_finalize_active_waypoint("mission_aborted")
+	_finalize_target_event("mission_aborted")
+	var direct_distance := _mission_direct_distance()
+	var summary := {
+		"mission_id":Game.selected_mission_id,"outcome":"中途退出","success":false,
+		"elapsed":_mission_elapsed,"active_gameplay_elapsed":_active_gameplay_elapsed,
+		"terminal_session_elapsed_ms":_mission_terminal_session_ms,
+		"limit":Game.current_sector.time_limit_s if Game.current_sector != null else 0.0,
+		"revivals":_mission_deaths,"hits":_mission_hits,"damage_taken":_mission_damage_taken,
+		"waypoint_requests":_mission_waypoint_requests,"waypoints":_mission_waypoints,
+		"rejected_waypoints":_mission_rejected_waypoints,"hull":Game.hull,
+		"path_length":_mission_path_length,"direct_distance":direct_distance,
+		"path_efficiency_ratio":minf(1.0,direct_distance/_mission_path_length) if _mission_path_length>0.001 else null,
+		"severe_heading_deviations":_severe_heading_deviations,
+		"waypoint_drift_events":_waypoint_drift_events,"ship_shear_events":_ship_shear_events,
+		"target_event_triggered":(_waypoint_drift_events+_ship_shear_events)>0,
+		"aborted_reason":reason,
+	}
+	ExperimentLog.log_event("mission_aborted","system",summary)
+	ExperimentLog.record_mission(summary)
 
 
 func _bind_inputs() -> void:
@@ -846,6 +999,8 @@ func _apply_death_white(value: float) -> void:
 
 func _on_ship_hit(remaining: float) -> void:
 	_mission_hits += 1
+	_mission_damage_taken += maxf(0.0,_last_hull_for_damage-remaining)
+	_last_hull_for_damage = remaining
 	_collision_points.append(_world_to_trail(Game.ship_position))
 	GameAudio.play_ship_impact(remaining / Game.MAX_HULL)
 	ExperimentLog.log_event("ship_hit","pilot",{
@@ -889,6 +1044,7 @@ func _on_ship_exploded(world_pos: Vector3) -> void:
 		_death_time = 0.0
 		_begin_mission_end.call_deferred("异常后飞船解体",false)
 		return
+	_finalize_active_waypoint("ship_exploded")
 	_restarting = true
 	_prime_explosion_visual(world_pos)
 	# 顿帧强化冲击 → 白屏闪两下后拉到纯白 → 纯白遮挡下传回出生点 → 淡出。
@@ -903,12 +1059,15 @@ func _on_ship_exploded(world_pos: Vector3) -> void:
 	if Game.selected_mission_id in ["level_2","level_3"] and get_tree().current_scene != null:
 		# 核心异常尚未发生：本次没有可评价事件，重新开始该关且保留下一次触发资格。
 		ExperimentLog.log_event("pre_target_failure_restart","system",{"elapsed":_mission_elapsed})
+		_record_aborted_mission("pre_target_failure")
 		_restarting = false
 		Game.reset_run()
 		get_tree().reload_current_scene()
 		return
 	var checkpoint := Game.last_respawn_point()
 	Game.respawn_ship_at(checkpoint.position,checkpoint.heading)
+	_last_hull_for_damage = Game.hull
+	_path_last_position = checkpoint.position
 	ExperimentLog.begin_new_life()
 	ExperimentLog.advance_segment()
 	if _ship != null:
@@ -1039,8 +1198,13 @@ func _on_waypoint_sfx(_pos: Vector3, enabled: bool) -> void:
 
 
 func _on_waypoint_request_result(accepted: bool, reason: String, remaining_s: float) -> void:
+	_mission_waypoint_requests += 1
 	if accepted:
 		_mission_waypoints += 1
+	else:
+		_mission_rejected_waypoints += 1
+		if not _target_event_record.is_empty() and not _target_event_written:
+			_target_event_record["failed_waypoint_requests"] = int(_target_event_record.get("failed_waypoint_requests",0))+1
 	# 冷却中重复点击只是无效输入，不作为错误播放失败音；边界等真正无效请求才提示。
 	if not accepted and reason != "cooldown":
 		GameAudio.play_waypoint_denied()
@@ -1055,27 +1219,51 @@ func _on_waypoint_request_result(accepted: bool, reason: String, remaining_s: fl
 	})
 	var to_requested := Game.last_waypoint_requested-Game.ship_position
 	to_requested.y = 0.0
-	var requested_heading := atan2(-to_requested.x,-to_requested.z) if to_requested.length_squared()>0.0001 else Game.ship_heading
 	var drift_angle := 0.0
 	if accepted:
 		var before := Game.last_waypoint_requested-Game.ship_position
 		var after := Game.last_waypoint_applied-Game.ship_position
 		if before.length_squared()>0.0001 and after.length_squared()>0.0001:
 			drift_angle = rad_to_deg(atan2(before.normalized().cross(after.normalized()).y,before.normalized().dot(after.normalized())))
-	ExperimentLog.record_waypoint({
+	var applied_target := Game.last_waypoint_applied if accepted else Game.last_waypoint_requested
+	var to_applied := applied_target-Game.ship_position
+	to_applied.y = 0.0
+	var applied_heading := atan2(-to_applied.x,-to_applied.z) if to_applied.length_squared()>0.0001 else Game.ship_heading
+	var record := {
 		"waypoint_id":"%s-waypoint-%04d" % [ExperimentLog.current_attempt_id(),Game.waypoint_request_sequence],
 		"request_sequence":Game.waypoint_request_sequence,"request_session_elapsed_ms":ExperimentLog.session_elapsed_ms(),
 		"accepted":accepted,"reason":reason,"remaining_cooldown_ms":remaining_s*1000.0,
 		"requested_x":Game.last_waypoint_requested.x,"requested_z":Game.last_waypoint_requested.z,
 		"applied_x":Game.last_waypoint_applied.x if accepted else null,"applied_z":Game.last_waypoint_applied.z if accepted else null,
 		"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z,
-		"initial_heading_error_deg":rad_to_deg(absf(wrapf(requested_heading-Game.ship_heading,-PI,PI))),
+		"initial_heading_error_deg":rad_to_deg(absf(wrapf(applied_heading-Game.ship_heading,-PI,PI))),
 		"waypoint_distance":Game.ship_position.distance_to(Game.last_waypoint_applied) if accepted else Game.ship_position.distance_to(Game.last_waypoint_requested),
 		"drifted":accepted and absf(drift_angle)>0.01,"drift_angle_deg":drift_angle,
-	})
-	if accepted and not _target_event_record.is_empty() and not _target_event_written and not _target_event_record.has("navigator_repair_latency_ms"):
+		"event_id":ExperimentLog.active_event_id(),
+		"fault_type":str(_target_event_record.get("fault_type","")) if not _target_event_record.is_empty() else "",
+		"initial_pilot_turn":Displays.pilot_turn_axis(),
+		"initial_pilot_thrust":Displays.pilot_thrust_axis(),
+	}
+	if not accepted:
+		record["completion_status"] = "rejected"
+		ExperimentLog.record_waypoint(record)
+		return
+	# 新航点会终止上一航点的响应窗口；每个已接受请求因此只写一行且都有明确结局。
+	_finalize_active_waypoint("overridden",true)
+	_active_waypoint_record = record
+	_waypoint_elapsed_s = 0.0
+	_alignment_hold_s = 0.0
+	_last_waypoint_heading_error = float(record.initial_heading_error_deg)
+	# 航点漂移是在本次请求内部生效的；这一次异常航点本身不能被误记成 0 ms 的“修正”。
+	var is_later_repair := (
+		accepted and not _target_event_record.is_empty() and not _target_event_written
+		and Game.waypoint_request_sequence > int(_target_event_record.get("request_sequence_at_onset",Game.waypoint_request_sequence))
+	)
+	if is_later_repair and not _target_event_record.has("navigator_repair_latency_ms"):
 		_target_event_record["navigator_repair_latency_ms"] = _target_event_elapsed_s*1000.0
 		_target_event_record["repair_waypoint_distance"] = Game.ship_position.distance_to(Game.last_waypoint_applied)
+		var onset_heading := float(_target_event_record.get("waypoint_heading_at_onset_rad",applied_heading))
+		_target_event_record["repair_waypoint_angle_deg"] = rad_to_deg(absf(wrapf(applied_heading-onset_heading,-PI,PI)))
 
 
 func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> void:
@@ -1088,6 +1276,7 @@ func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> vo
 			if _waypoint_drift_events > 0 or not (Game.get("_pending_waypoint_drifts") as Array).is_empty():
 				ExperimentLog.log_event("duplicate_target_event_suppressed","system",{"slot":slot,"gate_index":index})
 				return
+			_target_event_gate_index = index
 			var drift_angle := _draw_waypoint_drift_angle()
 			ExperimentLog.log_event("waypoint_drift_drawn","system",{
 				"gate_index":index,
@@ -1104,6 +1293,7 @@ func _on_disturbance_gate_crossed(index: int,slot: String,anchor: Vector3) -> vo
 			if _ship_shear_events > 0:
 				ExperimentLog.log_event("duplicate_target_event_suppressed","system",{"slot":slot,"gate_index":index})
 				return
+			_target_event_gate_index = index
 			if _ship != null:
 				var impulse := _ship.apply_experiment_shear(4.8)
 				Game.disturbance_effect_applied.emit("ship_shear",{
@@ -1140,7 +1330,8 @@ func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
 		ExperimentLog.log_event("explanation_message_displayed","system",{
 			"event_id":event_id,"fault_type":effect,
 			"message_id":"%s_%s_v1" % [effect,Game.attribution_condition],"message_version":"1",
-			"message_displayed":true,"displayed_to_participants":[Game.participant_id_for_role("navigator"),Game.participant_id_for_role("pilot")],
+			"message_displayed":true,"display_duration_ms":3000,
+			"displayed_to_participants":[Game.participant_id_for_role("navigator"),Game.participant_id_for_role("pilot")],
 		})
 	# 目标事件记录必须先于任何截图等待建立。第三关截图会等待下一帧；如果这一帧内
 	# 恰好跨过安全门或飞船解体，结算回调仍应拿到完整的事件起点数据。
@@ -1148,17 +1339,28 @@ func _on_disturbance_effect_applied(effect: String,payload: Dictionary) -> void:
 		details["pulse_index"] = pulse_index
 		details["event_id"] = event_id
 		_target_event_elapsed_s = 0.0
+		_target_recovery_hold_s = 0.0
 		_target_event_written = false
+		var heading_at_onset := _current_waypoint_heading_error_deg()
+		var to_waypoint := Game.waypoint-Game.ship_position if Game.has_waypoint else Vector3.ZERO
+		to_waypoint.y = 0.0
 		_target_event_record = {
 			"event_id":event_id,"event_type":effect,"fault_type":effect,
 			"event_time_session_ms":ExperimentLog.session_elapsed_ms(),"event_time_mission_ms":_mission_elapsed*1000.0,
+			"trigger_gate_index":_target_event_gate_index,
 			"parameter_name":"angle_degrees" if effect=="waypoint_drift" else "strength",
 			"parameter_value":payload.get("angle_degrees",payload.get("strength",null)),
 			"ship_x":Game.ship_position.x,"ship_z":Game.ship_position.z,"speed_at_event":Game.ship_speed,
 			"waypoint_distance_at_event":Game.ship_position.distance_to(Game.waypoint) if Game.has_waypoint else null,
 			"obstacle_distance_at_event":_nearest_body_surface_gap(),"details":details,
 			"hits_at_onset":_mission_hits,"hull_at_onset":Game.hull,
+			"waypoint_heading_at_onset_rad":atan2(-to_waypoint.x,-to_waypoint.z) if to_waypoint.length_squared()>0.0001 else Game.ship_heading,
+			"request_sequence_at_onset":Game.waypoint_request_sequence,
+			"pilot_turn_at_onset":Displays.pilot_turn_axis(),
+			"pilot_thrust_at_onset":Displays.pilot_thrust_axis(),
 		}
+		if heading_at_onset >= 0.0:
+			_target_event_record["heading_error_at_onset_deg"] = heading_at_onset
 	if effect == "waypoint_drift":
 		_waypoint_drift_events += 1
 		_append_target_event_position(Game.ship_position)
@@ -1418,6 +1620,8 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	if _mission_ended or _mission_finishing:
 		return
 	_mission_finishing = true
+	_mission_terminal_session_ms = ExperimentLog.session_elapsed_ms()
+	_finalize_active_waypoint("mission_success" if success else "mission_failure")
 	_finalize_target_event("mission_success" if success else "mission_failure")
 	GameAudio.stop_ship_motion()
 	GameAudio.finish_mission_audio()
@@ -1435,11 +1639,18 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 		await get_tree().create_timer(0.65,true,false,true).timeout
 	_mission_ended = true
 	var limit := Game.current_sector.time_limit_s if Game.current_sector != null else _mission_elapsed
+	var direct_distance := _mission_direct_distance()
 	var summary := {
 		"mission_id":Game.selected_mission_id,
 		"outcome":outcome,"success":success,"elapsed":_mission_elapsed,"limit":limit,
 		"timed":Game.selected_mission_id!="practice",
+		"active_gameplay_elapsed":_active_gameplay_elapsed,
+		"terminal_session_elapsed_ms":_mission_terminal_session_ms,
 		"revivals":_mission_deaths,"hits":_mission_hits,"waypoints":_mission_waypoints,"hull":Game.hull,
+		"waypoint_requests":_mission_waypoint_requests,"rejected_waypoints":_mission_rejected_waypoints,
+		"damage_taken":_mission_damage_taken,"path_length":_mission_path_length,
+		"direct_distance":direct_distance,
+		"path_efficiency_ratio":minf(1.0,direct_distance/_mission_path_length) if _mission_path_length>0.001 else null,
 		"severe_heading_deviations":_severe_heading_deviations,
 		"waypoint_drift_events":_waypoint_drift_events,
 		"ship_shear_events":_ship_shear_events,
@@ -1451,7 +1662,10 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	await _show_result_flow(outcome,success,summary)
 	if Game.selected_mission_id == "practice":
 		_show_surveys(outcome,summary)
-	elif Game.selected_mission_id in ["level_1","level_2","level_3"]:
+	elif Game.selected_mission_id == "level_1":
+		# 正常条件只建立对象特定状态信任基线，没有唯一异常，不做事件责任分配。
+		_show_surveys(outcome,summary)
+	elif Game.selected_mission_id in ["level_2","level_3"]:
 		var review := _required_review()
 		if review.is_empty():
 			_show_mission_attribution_surveys()

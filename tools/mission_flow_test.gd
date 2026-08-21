@@ -11,6 +11,7 @@ func _run() -> void:
 	_check_causal_explanation_copy()
 	_check_waypoint_drift_randomization()
 	await _check_target_record_precedes_capture_wait()
+	await _check_waypoint_response_summary()
 	_check_relay_respawn_policy()
 	await _check_timed_respawn_flow()
 	_check_heading_event_counter()
@@ -30,6 +31,34 @@ func _check_target_record_precedes_capture_wait() -> void:
 	assert(not record.is_empty(),"target record was initialized after the screenshot await")
 	assert(str(record.get("event_type",""))=="waypoint_drift","target record stored the wrong event type")
 	assert(str(record.get("event_id",""))==str((record.get("details",{}) as Dictionary).get("event_id","")),"target record details lost the event id")
+	tracker.call("_update_target_event_window",15.1)
+	assert(not bool(tracker.get("_target_event_written")),"15-second analysis window discarded later safe-gate timing")
+	tracker.call("_on_safe_gate_crossed",0,Vector3.ZERO)
+	assert(bool(tracker.get("_target_event_written")),"safe gate did not finalize the target-event summary")
+	assert(float((tracker.get("_target_event_record") as Dictionary).get("time_to_safe_gate_ms",0.0))>=15000.0,
+		"safe-gate latency was lost when it occurred after 15 seconds")
+	tracker.queue_free()
+	await process_frame
+
+
+func _check_waypoint_response_summary() -> void:
+	var game := root.get_node("Game")
+	game.call("select_mission","level_1")
+	var tracker: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(tracker)
+	for i: int in range(3): await process_frame
+	var requested := Vector3(game.get("ship_position"))+Vector3(18.0,0.0,0.0)
+	assert(bool(game.call("set_waypoint",requested)),"waypoint response probe was rejected")
+	var active := tracker.get("_active_waypoint_record") as Dictionary
+	assert(not active.is_empty(),"accepted waypoint did not open a response window")
+	var to_waypoint: Vector3 = Vector3(game.get("waypoint"))-Vector3(game.get("ship_position"))
+	game.set("ship_heading",atan2(-to_waypoint.x,-to_waypoint.z))
+	tracker.call("_update_waypoint_response",3.1)
+	active = tracker.get("_active_waypoint_record") as Dictionary
+	assert(active.has("heading_error_reduction_3s_deg"),"waypoint heading improvement was never summarized")
+	assert(active.has("time_to_alignment_20deg_ms"),"waypoint alignment latency was never summarized")
+	tracker.call("_finalize_active_waypoint","test_complete")
+	assert((tracker.get("_active_waypoint_record") as Dictionary).is_empty(),"waypoint response window did not finalize")
 	tracker.queue_free()
 	await process_frame
 
@@ -70,8 +99,8 @@ func _check_end_ui_layout() -> void:
 	await process_frame
 	var trust_order := survey.get("_page_ids") as Array
 	assert(trust_order.size()==3 and trust_order.has("partner") and trust_order.has("navigation") and trust_order.has("ship"),"formal mission must contain three trust blocks")
-	assert((survey.get("_answers") as Dictionary)["questionnaire_variant"]=="post_attribution_state","formal state variant was not recorded")
-	assert((survey.get("_answers") as Dictionary)["instrument_version"]=="post-attribution-state-4.2","formal state instrument version was not updated")
+	assert((survey.get("_answers") as Dictionary)["questionnaire_variant"]=="baseline_state","normal mission baseline variant was not recorded")
+	assert((survey.get("_answers") as Dictionary)["instrument_version"]=="baseline-state-1.0","normal mission baseline instrument version was not recorded")
 	survey.call("_show_page",trust_order.find("partner"))
 	await process_frame
 	assert(_visible_text(survey).contains("我的搭档（驾驶员）仍然能够可靠地履行自己的任务职责"),"partner wording was not role-specific and neutral")
@@ -267,14 +296,18 @@ func _check_timed_respawn_flow() -> void:
 	assert(int(main.get("_mission_deaths"))==1,"revival was not counted")
 	assert(float(main.get("_mission_elapsed"))>=40.0,"death reset mission timer")
 	assert(not bool(main.get("_mission_ended")),"death incorrectly ended mission before timeout")
-	# 第一段正常正式飞行也必须在自然结算后进入本关责任分配；它是正式测量，不能静默跳过。
+	# 第一段正常正式飞行在自然结算后只测基线状态信任，不制造一个不存在的责任事件。
 	main.call("_begin_mission_end","超时未完成",false)
-	await create_timer(6.0,true,false,true).timeout
+	await create_timer(7.0,true,false,true).timeout
 	assert(bool(main.get("_mission_ended")),"timeout did not end mission")
 	assert(not bool(game.get("ship_alive")),"terminal timeout explosion incorrectly respawned")
-	assert(root.find_children("MissionAttribution_*","",true,false).size()==2,
-		"first formal flight did not open two mission attribution questionnaires")
-	assert(root.find_children("SurveyPanel_*","",true,false).is_empty(),"normal level incorrectly opened post-event state surveys")
+	assert(root.find_children("MissionAttribution_*","",true,false).is_empty(),
+		"normal baseline incorrectly opened event attribution")
+	var baseline_surveys := root.find_children("SurveyPanel_*","",true,false)
+	assert(baseline_surveys.size()==2,"first formal flight did not open two baseline state surveys")
+	for survey: Node in baseline_surveys:
+		assert(str((survey.get("_answers") as Dictionary).get("questionnaire_variant",""))=="baseline_state",
+			"normal flight used the wrong questionnaire variant")
 	main.queue_free()
 	await process_frame
 

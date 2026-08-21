@@ -69,7 +69,7 @@ var waypoint_max_distance: float = 72.0
 const SETTINGS_PATH := "user://settings.cfg"
 ## 每次需要参与者重新确认声音、动态效果和 macOS 权限说明时递增。
 const SETTINGS_REVISION: int = 2
-const EXPERIMENT_PROTOCOL_VERSION := "in-game-measures-4.3"
+const EXPERIMENT_PROTOCOL_VERSION := "in-game-measures-4.4"
 var settings_revision: int = 0
 var dyad_sequence: int = 0
 var dyad_id: String = ""

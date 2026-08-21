@@ -2,7 +2,7 @@ extends Node
 ## 实验原始数据只追加。主线程只构造短字符串并入队；专用 worker 独占 FileAccess。
 
 const ROOT_DIR := "user://experiments"
-const SCHEMA_VERSION := "4.0.0"
+const SCHEMA_VERSION := "4.1.0"
 const FLUSH_INTERVAL_S := 1.0
 const MAX_PENDING_FRAMES := 6000
 
@@ -18,15 +18,19 @@ var SESSION_COLUMNS = COMMON_COLUMNS + [
 var MISSION_COLUMNS = COMMON_COLUMNS + [
 	"attempt_number","started_session_elapsed_ms","ended_session_elapsed_ms","outcome","success",
 	"wall_time_ms","active_gameplay_time_ms","survey_pause_time_ms","other_pause_time_ms","time_limit_ms",
-	"damage_events","deaths","accepted_waypoints","hull_end",
+	"damage_events","damage_taken","deaths","waypoint_requests","accepted_waypoints","rejected_waypoints","hull_end",
+	"path_length","direct_distance","path_efficiency_ratio",
 	"severe_heading_deviations","waypoint_drift_events","ship_shear_events","target_event_triggered","aborted_reason",
 ]
 var TARGET_EVENT_COLUMNS = COMMON_COLUMNS + [
 	"event_type","event_time_session_ms","event_time_mission_ms","trigger_gate_index","parameter_name","parameter_value",
 	"ship_x","ship_z","speed_at_event","waypoint_distance_at_event","obstacle_distance_at_event",
 	"navigator_repair_latency_ms","repair_waypoint_angle_deg","repair_waypoint_distance","failed_waypoint_requests",
+	"pilot_response_latency_ms","recovery_time_ms","heading_error_at_onset_deg",
+	"heading_error_reduction_3s_deg","heading_error_reduction_5s_deg",
 	"max_heading_error_deg_15s","max_cross_track_error_15s","time_to_safe_gate_ms","damage_events_15s",
-	"hull_loss_15s","disintegrated_15s","recovered_within_window","window_observed_ms","outcome","payload_json",
+	"hull_loss_15s","collision_within_15s","explosion_within_15s","disintegrated_15s",
+	"recovered_within_window","window_observed_ms","outcome","payload_json",
 ]
 var RATING_COLUMNS = COMMON_COLUMNS + [
 	"instrument_version","questionnaire_variant","outcome_success","target_event_applicable","target_event_exposed",
@@ -205,8 +209,14 @@ func _write_quality_report(absolute_raw_dir: String) -> void:
 	if targets.is_empty(): issues.append("target_events.csv 没有目标异常记录")
 	if waypoints.is_empty(): issues.append("waypoints.csv 没有航点请求记录")
 	for mission: Dictionary in missions:
-		if float(mission.get("active_gameplay_time_ms",0.0)) <= 0.0:
+		var aborted := not str(mission.get("aborted_reason","")).is_empty()
+		if not aborted and float(mission.get("active_gameplay_time_ms",0.0)) <= 0.0:
 			issues.append("任务 %s 的游戏内用时不大于 0" % mission.get("attempt_id",""))
+		if not aborted and str(mission.get("mission_id","")) in ["level_1","level_2","level_3"]:
+			if float(mission.get("path_length",0.0)) <= 0.0:
+				issues.append("正式任务 %s 缺少实际航行路径长度" % mission.get("attempt_id",""))
+			if float(mission.get("direct_distance",0.0)) <= 0.0:
+				issues.append("正式任务 %s 缺少起终点直线距离" % mission.get("attempt_id",""))
 	var target_ids := {}
 	for target: Dictionary in targets:
 		var event_id := str(target.get("event_id",""))
@@ -215,6 +225,16 @@ func _write_quality_report(absolute_raw_dir: String) -> void:
 		elif target_ids.has(event_id):
 			issues.append("目标异常 event_id 重复：%s" % event_id)
 		target_ids[event_id] = true
+		if str(target.get("trigger_gate_index","")).is_empty():
+			issues.append("目标异常缺少触发门编号：%s" % event_id)
+		if float(target.get("window_observed_ms",0.0)) <= 0.0:
+			issues.append("目标异常没有异常后行为观察窗口：%s" % event_id)
+	for waypoint: Dictionary in waypoints:
+		if str(waypoint.get("accepted","false")).to_lower()=="true":
+			if str(waypoint.get("completion_status","")).is_empty():
+				issues.append("已接受航点缺少响应窗口结局：%s" % waypoint.get("waypoint_id",""))
+			if str(waypoint.get("response_window_observed_ms","")).is_empty():
+				issues.append("已接受航点缺少响应观察时长：%s" % waypoint.get("waypoint_id",""))
 	for rating: Dictionary in ratings:
 		var values := ["responsibility_self","responsibility_partner","responsibility_navigation_system","responsibility_ship_system","responsibility_environment"]
 		var has_all := true
@@ -227,6 +247,22 @@ func _write_quality_report(absolute_raw_dir: String) -> void:
 		var rating_event := str(rating.get("event_id",""))
 		if bool(str(rating.get("target_event_applicable","false")).to_lower()=="true") and not target_ids.has(rating_event):
 			issues.append("目标事件问卷未连接到 target_events.csv：%s" % rating_event)
+	var expected_variants := {
+		"practice":["training_comprehension"],
+		"level_1":["baseline_state"],
+		"level_2":["event_responsibility_100","post_attribution_state"],
+		"level_3":["event_responsibility_100","post_attribution_state"],
+	}
+	for mission: Dictionary in missions:
+		var mission_id := str(mission.get("mission_id",""))
+		if not expected_variants.has(mission_id) or not str(mission.get("aborted_reason","")).is_empty(): continue
+		for variant: String in expected_variants[mission_id]:
+			var count := 0
+			for rating: Dictionary in ratings:
+				if str(rating.get("mission_id",""))==mission_id and str(rating.get("questionnaire_variant",""))==variant:
+					count += 1
+			if count != 2:
+				issues.append("任务 %s 的 %s 应有两名参与者记录，实际为 %d" % [mission_id,variant,count])
 	var report := {
 		"schema_version":SCHEMA_VERSION,"session_id":session_id,"dyad_id":Game.dyad_id,
 		"generated_utc":Time.get_datetime_string_from_system(true,true),
@@ -342,16 +378,19 @@ func session_elapsed_ms() -> float:
 func record_mission(summary: Dictionary) -> void:
 	if session_id.is_empty() or _attempt_id.is_empty():
 		return
-	var ended_ms := session_elapsed_ms()
+	# 任务终点时间由主场景在自然结束条件满足的那一刻冻结，排除之后的失败动画与问卷界面。
+	var ended_ms := float(summary.get("terminal_session_elapsed_ms",session_elapsed_ms()))
 	var wall_time_ms := maxf(0.0,ended_ms-_attempt_started_elapsed_ms)
-	var active_ms := float(summary.get("elapsed",0.0))*1000.0
+	var active_ms := float(summary.get("active_gameplay_elapsed",summary.get("elapsed",0.0)))*1000.0
 	var survey_pause_ms := float(summary.get("survey_pause_s",0.0))*1000.0
 	var other_pause_ms := maxf(0.0,wall_time_ms-active_ms-survey_pause_ms)
 	var row := _common_values("","system","","",Game.selected_mission_id) + [
 		_attempt_number,_attempt_started_elapsed_ms,ended_ms,str(summary.get("outcome","")),
 		bool(summary.get("success",false)),wall_time_ms,active_ms,survey_pause_ms,other_pause_ms,
-		float(summary.get("limit",0.0))*1000.0,int(summary.get("hits",0)),int(summary.get("revivals",0)),
-		int(summary.get("waypoints",0)),float(summary.get("hull",Game.hull)),
+		float(summary.get("limit",0.0))*1000.0,int(summary.get("hits",0)),float(summary.get("damage_taken",0.0)),
+		int(summary.get("revivals",0)),int(summary.get("waypoint_requests",summary.get("waypoints",0))),
+		int(summary.get("waypoints",0)),int(summary.get("rejected_waypoints",0)),float(summary.get("hull",Game.hull)),
+		summary.get("path_length",null),summary.get("direct_distance",null),summary.get("path_efficiency_ratio",null),
 		int(summary.get("severe_heading_deviations",0)),int(summary.get("waypoint_drift_events",0)),
 		int(summary.get("ship_shear_events",0)),bool(summary.get("target_event_triggered",false)),
 		str(summary.get("aborted_reason","")),
@@ -370,8 +409,12 @@ func record_target_event(record: Dictionary) -> void:
 		record.get("waypoint_distance_at_event",null),record.get("obstacle_distance_at_event",null),
 		record.get("navigator_repair_latency_ms",null),record.get("repair_waypoint_angle_deg",null),
 		record.get("repair_waypoint_distance",null),record.get("failed_waypoint_requests",0),
+		record.get("pilot_response_latency_ms",null),record.get("recovery_time_ms",null),
+		record.get("heading_error_at_onset_deg",null),record.get("heading_error_reduction_3s_deg",null),
+		record.get("heading_error_reduction_5s_deg",null),
 		record.get("max_heading_error_deg_15s",null),record.get("max_cross_track_error_15s",null),
 		record.get("time_to_safe_gate_ms",null),record.get("damage_events_15s",0),record.get("hull_loss_15s",0.0),
+		bool(record.get("collision_within_15s",false)),bool(record.get("explosion_within_15s",false)),
 		bool(record.get("disintegrated_15s",false)),bool(record.get("recovered_within_window",false)),
 		record.get("window_observed_ms",0.0),str(record.get("outcome","")),JSON.stringify(record.get("details",{})),
 	]

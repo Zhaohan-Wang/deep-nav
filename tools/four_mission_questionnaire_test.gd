@@ -24,6 +24,9 @@ func _check_state_surveys() -> void:
 		await process_frame
 		var state_order := survey.get("_page_ids") as Array
 		assert(state_order.size()==3 and state_order.has("partner") and state_order.has("navigation") and state_order.has("ship"),"%s did not contain three balanced trust blocks" % mission_id)
+		var expected_variant := "baseline_state" if mission_id=="level_1" else "post_attribution_state"
+		assert(str((survey.get("_answers") as Dictionary).get("questionnaire_variant",""))==expected_variant,
+			"%s used the wrong state questionnaire timing variant" % mission_id)
 		survey.call("_show_page",state_order.find("partner"))
 		await process_frame
 		assert(_all_text(survey).contains("我的搭档（驾驶员）仍然能够可靠地履行自己的任务职责"),"%s partner wording was not role-specific" % mission_id)
@@ -65,7 +68,7 @@ func _check_mission_capture_for_all_four() -> void:
 func _check_allocator_for_all_four() -> void:
 	var host := _host()
 	var first_order: Array = []
-	for mission_id: String in _levels():
+	for mission_id: String in ["level_2","level_3"]:
 		var panel: Control = load("res://scripts/ui/mission_attribution_panel.gd").new()
 		host.add_child(panel)
 		panel.setup("navigator","D001A",_record(mission_id))
@@ -125,7 +128,7 @@ func _check_allocator_for_all_four() -> void:
 
 func _check_each_level_enters_allocator() -> void:
 	var game := root.get_node("Game")
-	for mission_id: String in ["level_1","level_2","level_3"]:
+	for mission_id: String in ["level_2","level_3"]:
 		game.session_mission_index = MissionCatalog.IDS.find(mission_id)
 		game.call("select_mission",mission_id)
 		game.call("store_event_review",mission_id,_record(mission_id))

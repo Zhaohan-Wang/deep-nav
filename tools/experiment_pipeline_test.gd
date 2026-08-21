@@ -29,22 +29,39 @@ func _run() -> void:
 	experiment_log.begin_session()
 	_check(not experiment_log.session_id.is_empty(),"session should start after group setup")
 	var raw_dir: String = experiment_log.session_dir
+	# 合成探针不是四个实际任务之一，避免完整实验问卷数量校验把它当作中途退出。
+	game.selected_mission_id = "pipeline_probe"
 	experiment_log.begin_mission_attempt(1)
 	experiment_log.log_event("pipeline_probe","screen_a",{"comma":"a,b","quote":"\"ok\""})
 	for i: int in range(120):
 		game.ship_position = Vector3(float(i),0.0,-float(i))
 		game.ship_velocity = Vector3(1.0,0.0,-1.0)
 		experiment_log.sample_frame()
-	experiment_log.record_waypoint({"waypoint_id":"probe-waypoint","request_sequence":1,"accepted":true})
+	experiment_log.record_waypoint({
+		"waypoint_id":"probe-waypoint","request_sequence":1,"accepted":true,
+		"response_window_observed_ms":3200.0,"waypoint_response_latency_ms":420.0,
+		"heading_error_reduction_3s_deg":18.0,"time_to_alignment_20deg_ms":2100.0,
+		"completion_status":"mission_success",
+	})
 	experiment_log.set_active_target_event("probe-event-01","waypoint_drift")
-	experiment_log.record_target_event({"event_id":"probe-event-01","event_type":"waypoint_drift"})
+	experiment_log.record_target_event({
+		"event_id":"probe-event-01","event_type":"waypoint_drift","trigger_gate_index":0,
+		"window_observed_ms":15000.0,"pilot_response_latency_ms":510.0,"recovery_time_ms":4300.0,
+		"heading_error_at_onset_deg":42.0,"heading_error_reduction_3s_deg":20.0,
+		"heading_error_reduction_5s_deg":31.0,"collision_within_15s":false,
+	})
 	for role: String in ["navigator","pilot"]:
 		experiment_log.record_rating(role,"probe-event-01",{
 			"questionnaire_variant":"event_responsibility_100","target_event_applicable":true,
 			"responsibility_self":20,"responsibility_partner":20,"responsibility_navigation_system":20,
 			"responsibility_ship_system":20,"responsibility_environment":20,
 		})
-	experiment_log.record_mission({"outcome":"probe","success":true,"elapsed":1.0,"limit":10.0,"waypoints":1,"target_event_triggered":true})
+	experiment_log.record_mission({
+		"outcome":"probe","success":true,"elapsed":1.0,"active_gameplay_elapsed":1.0,
+		"limit":10.0,"waypoint_requests":2,"waypoints":1,"rejected_waypoints":1,
+		"damage_taken":12.0,"path_length":120.0,"direct_distance":100.0,
+		"path_efficiency_ratio":0.833333,"target_event_triggered":true,
+	})
 	experiment_log.close_session()
 
 	var events_path := "%s/events.csv" % raw_dir
@@ -60,7 +77,13 @@ func _run() -> void:
 	_check(_csv_row_count("%s/target_events.csv" % raw_dir)==2,"target-event summary should be written")
 	_check(_csv_row_count("%s/waypoints.csv" % raw_dir)==2,"waypoint summary should be written")
 	_check(FileAccess.file_exists("%s/quality_report.json" % raw_dir),"quality report should be generated")
+	var quality := JSON.parse_string(FileAccess.get_file_as_string("%s/quality_report.json" % raw_dir)) as Dictionary
+	_check(bool(quality.get("passed",false)),"synthetic complete pipeline did not pass the quality report")
+	_check(_csv_header_contains("%s/missions.csv" % raw_dir,["damage_taken","waypoint_requests","rejected_waypoints","path_length","path_efficiency_ratio"]),"mission behavior-summary columns are incomplete")
+	_check(_csv_header_contains("%s/target_events.csv" % raw_dir,["pilot_response_latency_ms","recovery_time_ms","heading_error_reduction_3s_deg","heading_error_reduction_5s_deg","collision_within_15s"]),"target-event recovery columns are incomplete")
+	_check(_csv_header_contains("%s/waypoints.csv" % raw_dir,["response_window_observed_ms","waypoint_response_latency_ms","completion_status"]),"waypoint response columns are incomplete")
 
+	game.call("select_mission","practice")
 	game.has_waypoint = true
 	game.ship_position = Vector3.ZERO
 	game.waypoint = Vector3(10.0,0.0,0.0)
@@ -105,6 +128,17 @@ func _csv_row_count(path: String) -> int:
 		if not row.is_empty() and not (row.size()==1 and row[0].is_empty()):
 			count += 1
 	return count
+
+
+func _csv_header_contains(path: String,columns: Array[String]) -> bool:
+	var file := FileAccess.open(path,FileAccess.READ)
+	if file==null or file.eof_reached():
+		return false
+	var header := Array(file.get_csv_line())
+	for column: String in columns:
+		if not header.has(column):
+			return false
+	return true
 
 
 func _cleanup(raw_dir: String) -> void:
