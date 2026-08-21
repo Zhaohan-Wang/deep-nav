@@ -1,7 +1,7 @@
 extends SceneTree
 ## 新封面、姿态仪和飞船图标的尺寸、透明通道与正向约定防回归。
 
-const TITLE_BG := "res://assets/ui/title/title_background.jpg"
+const TITLE_BG := "res://assets/ui/title/title_background.png"
 const TITLE_ART := "res://assets/ui/title/deep_nav_title.png"
 const ATTITUDE := "res://assets/ui/cockpit/attitude_indicator.png"
 const SHIP := "res://assets/ships/deep_nav_ship.png"

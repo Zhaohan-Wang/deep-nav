@@ -1,7 +1,7 @@
 extends Control
 
 const UI = preload("res://scripts/ui/app_style.gd")
-const BACKGROUND_PATH := "res://assets/ui/title/title_background.jpg"
+const BACKGROUND_PATH := "res://assets/ui/title/title_background.png"
 const TITLE_PATH := "res://assets/ui/title/deep_nav_title.png"
 
 var _settings: Control
