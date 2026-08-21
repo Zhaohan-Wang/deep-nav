@@ -13,8 +13,34 @@ func _initialize() -> void:
 func _run() -> void:
 	var raw := root.get_node("RawMice")
 	var displays := root.get_node("Displays")
+	# 同一接收器的多个 Keyboard HID interface 必须全部保留在 B；其中一个断开时，
+	# 另一个仍能继续提供按键，不能把整个逻辑键盘误删掉。
+	raw.set("_keyboards",{})
+	raw.set("_keyboard_devices",{0:{},1:{}})
+	raw.call("_handle_message",{"type":"device","kind":"keyboard","connected":true,
+		"slot":0,"id":100,"product":"Apple Internal Keyboard"})
+	raw.call("_handle_message",{"type":"device","kind":"keyboard","connected":true,
+		"slot":1,"id":201,"product":"Wireless Receiver"})
+	raw.call("_handle_message",{"type":"device","kind":"keyboard","connected":true,
+		"slot":1,"id":202,"product":"Wireless Receiver"})
+	assert((raw.get("_keyboard_devices")[1] as Dictionary).size()==2,
+		"receiver keyboard interfaces collapsed or were discarded")
+	raw.call("_handle_message",{"type":"device","kind":"keyboard","connected":true,
+		"slot":1,"id":203,"product":"Test Magic Keyboard"})
+	assert(raw.keyboard_name(1)=="Test Magic Keyboard",
+		"real external keyboard was not preferred over mouse receiver interfaces")
+	raw.call("_handle_message",{"type":"key","slot":1,"id":201,"usage":HID_W,"pressed":true})
+	assert(not raw.is_hid_key_pressed(1,HID_W),
+		"mouse receiver pseudo-keyboard leaked a key into seat B")
+	raw.call("_handle_message",{"type":"key","slot":1,"id":203,"usage":HID_W,"pressed":true})
+	assert(raw.is_hid_key_pressed(1,HID_W),"real external keyboard did not reach seat B")
+	(raw.get("_pressed_keys")[1] as Dictionary).clear()
+	raw.call("_handle_message",{"type":"device","kind":"keyboard","connected":false,
+		"slot":1,"id":201,"product":"Wireless Receiver"})
+	assert(raw.has_keyboard(1),"disconnecting one receiver interface removed the whole B keyboard")
 	raw.set("_bridge_ready",true)
 	raw.set("_keyboards",{0:"Apple Internal Keyboard",1:"External Keyboard"})
+	raw.set("_keyboard_devices",{0:{"100":"Apple Internal Keyboard"},1:{"202":"External Keyboard"}})
 	raw.set("_pressed_keys",{0:{},1:{}})
 	raw.set("_keyboard_input_seen",{0:true,1:true})
 

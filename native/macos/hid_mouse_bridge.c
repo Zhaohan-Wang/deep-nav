@@ -129,8 +129,10 @@ static void device_added(void *context, IOReturn result, void *sender, IOHIDDevi
     }
     if (index < 0) return;
     HIDDevice *entry = &bridge->devices[index];
+    /* 一把物理外接键盘/接收器可能暴露多个 Keyboard HID interface。它们必须共同
+       组成逻辑席位 B，不能因为第一个接口占了 slot 1 就丢弃真正发送按键的接口。 */
     int role_slot = kind == DEVICE_KEYBOARD ? (built_in ? 0 : 1) : next_role_slot(bridge, kind);
-    if (role_slot < 0 || role_slot_in_use(bridge, kind, role_slot)) return;
+    if (role_slot < 0 || (kind == DEVICE_MOUSE && role_slot_in_use(bridge, kind, role_slot))) return;
     entry->device = device;
     entry->kind = kind;
     entry->built_in = built_in;
@@ -195,8 +197,9 @@ static void input_value(void *context, IOReturn result, void *sender, IOHIDValue
                  slot, usage, integer_value ? "true" : "false");
         send_message(bridge, message);
     } else if (kind == DEVICE_KEYBOARD && usage_page == kHIDPage_KeyboardOrKeypad && usage >= 4 && usage <= 231) {
-        snprintf(message, sizeof(message), "{\"type\":\"key\",\"slot\":%d,\"usage\":%u,\"pressed\":%s}",
-                 slot, usage, integer_value ? "true" : "false");
+        snprintf(message, sizeof(message), "{\"type\":\"key\",\"slot\":%d,\"id\":%llu,\"usage\":%u,\"pressed\":%s}",
+                 slot, (unsigned long long)bridge->devices[index].registry_id,
+                 usage, integer_value ? "true" : "false");
         send_message(bridge, message);
     }
 }

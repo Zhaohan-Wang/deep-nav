@@ -353,14 +353,19 @@ func _input_device_section() -> Control:
 	var timer := col.create_tween().set_loops()
 	timer.tween_callback(func() -> void:
 		# HID KeyboardOrKeypad：Left Shift=0xE1, Right Shift=0xE5
-		var a_held := bool(_system_shift_held.get(0, false)) or (
+		var raw_a_held := (
 			RawMice.is_hid_key_pressed(0, 0xE1) or
 			RawMice.is_hid_key_pressed(0, 0xE5)
 		)
-		var b_held := bool(_system_shift_held.get(1, false)) or (
+		var raw_b_held := (
 			RawMice.is_hid_key_pressed(1, 0xE1) or
 			RawMice.is_hid_key_pressed(1, 0xE5)
 		)
+		# 一旦任一物理 HID 通道给出明确来源，就完全忽略 macOS 合并事件，
+		# 防止外接键盘既点亮 B、又通过系统副本误点亮 A。
+		var has_raw_source := raw_a_held or raw_b_held
+		var a_held := raw_a_held or (not has_raw_source and bool(_system_shift_held.get(0, false)))
+		var b_held := raw_b_held
 		_update_kbd_indicator(ind_a, a_held)
 		_update_kbd_indicator(ind_b, b_held)
 	).set_delay(0.05)

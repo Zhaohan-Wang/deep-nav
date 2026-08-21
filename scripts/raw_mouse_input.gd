@@ -17,6 +17,8 @@ var _udp: PacketPeerUDP
 var _bridge_pid: int = -1
 var _devices: Dictionary = {}
 var _keyboards: Dictionary = {}
+## 一个接收器可能暴露多个 Keyboard HID interface；按 device_id 聚合到同一席位。
+var _keyboard_devices: Dictionary = {0: {}, 1: {}}
 var _pressed_keys: Dictionary = {0: {}, 1: {}}
 ## 设备枚举成功不代表接收器会发送 IOHID 按键包；只有真正收到过 key 消息，
 ## 才把该席位视为可用的原始键盘通道。
@@ -116,12 +118,20 @@ func _handle_message(message: Dictionary) -> void:
 		if kind == "keyboard":
 			# Bridge 的 slot 是物理设备编号；这里映射到逻辑席位（屏幕 A/B）。
 			var slot := int(_keyboard_slots_to_seats.get(device_slot, device_slot))
+			var device_id := str(message.get("id", "%d:%s" % [device_slot, product]))
+			var seat_devices := _keyboard_devices.get(slot, {}) as Dictionary
 			if connected:
-				_keyboards[slot] = product
+				seat_devices[device_id] = product
 			else:
-				_keyboards.erase(slot)
+				seat_devices.erase(device_id)
+				# 任一组成接口断开都释放当前按键，宁可中断一次输入，也不能留下持续 W/A。
 				(_pressed_keys[slot] as Dictionary).clear()
 				_keyboard_input_seen[slot] = false
+			_keyboard_devices[slot] = seat_devices
+			if seat_devices.is_empty():
+				_keyboards.erase(slot)
+			else:
+				_keyboards[slot] = _preferred_keyboard_product(seat_devices)
 			keyboard_device_changed.emit(slot, connected, product)
 			if Game.experiment_mode:
 				ExperimentLog.log_event("input_device_changed","screen_a" if slot==0 else "screen_b",{
@@ -153,9 +163,12 @@ func _handle_message(message: Dictionary) -> void:
 		var device_slot := int(message.get("slot", -1))
 		# Bridge 的 slot 是物理设备编号；这里映射到逻辑席位（屏幕 A/B）。
 		var seat := int(_keyboard_slots_to_seats.get(device_slot, device_slot))
+		var device_id := str(message.get("id", ""))
 		var usage := int(message.get("usage", 0))
 		var pressed := bool(message.get("pressed", false))
 		if seat >= 0 and seat <= 1:
+			if not _keyboard_event_allowed(seat, device_id):
+				return
 			_keyboard_input_seen[seat] = true
 			var keys := _pressed_keys[seat] as Dictionary
 			var was_pressed := keys.has(usage)
@@ -170,6 +183,31 @@ func _handle_message(message: Dictionary) -> void:
 				ExperimentLog.log_event("keyboard_key","screen_a" if seat==0 else "screen_b",{
 					"usage":usage,"pressed":pressed,"keyboard":keyboard_name(seat),
 				})
+
+
+func _preferred_keyboard_product(devices: Dictionary) -> String:
+	for product: Variant in devices.values():
+		var name := str(product)
+		if _looks_like_real_keyboard(name):
+			return name
+	return str(devices.values()[0]) if not devices.is_empty() else ""
+
+
+func _keyboard_event_allowed(seat: int, device_id: String) -> bool:
+	if seat != 1 or device_id.is_empty():
+		return true
+	var devices := _keyboard_devices.get(seat, {}) as Dictionary
+	var explicit_keyboard_ids: Array[String] = []
+	for id: Variant in devices:
+		if _looks_like_real_keyboard(str(devices[id])):
+			explicit_keyboard_ids.append(str(id))
+	# 有明确的实体外接键盘时，鼠标接收器伪装出的 Keyboard interface 不得进入 B。
+	return explicit_keyboard_ids.is_empty() or explicit_keyboard_ids.has(device_id)
+
+
+func _looks_like_real_keyboard(product: String) -> bool:
+	var normalized := product.to_lower()
+	return normalized.contains("keyboard") or normalized.contains("键盘")
 
 
 func connected_mouse_count() -> int:
@@ -208,6 +246,8 @@ func swap_keyboard_seats() -> void:
 
 	var previous_a := str(_keyboards.get(0, ""))
 	var previous_b := str(_keyboards.get(1, ""))
+	var previous_devices_a := (_keyboard_devices.get(0, {}) as Dictionary).duplicate(true)
+	var previous_devices_b := (_keyboard_devices.get(1, {}) as Dictionary).duplicate(true)
 
 	var previous_pressed_a := (_pressed_keys.get(0, {}) as Dictionary).duplicate(true)
 	var previous_pressed_b := (_pressed_keys.get(1, {}) as Dictionary).duplicate(true)
@@ -217,6 +257,8 @@ func swap_keyboard_seats() -> void:
 	_keyboards.clear()
 	if not previous_b.is_empty(): _keyboards[0] = previous_b
 	if not previous_a.is_empty(): _keyboards[1] = previous_a
+	_keyboard_devices[0] = previous_devices_b
+	_keyboard_devices[1] = previous_devices_a
 
 	_pressed_keys[0] = previous_pressed_b
 	_pressed_keys[1] = previous_pressed_a
