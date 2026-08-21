@@ -125,7 +125,7 @@ func _check_allocator_for_all_four() -> void:
 
 func _check_each_level_enters_allocator() -> void:
 	var game := root.get_node("Game")
-	for mission_id: String in ["level_2","level_3"]:
+	for mission_id: String in ["level_1","level_2","level_3"]:
 		game.session_mission_index = MissionCatalog.IDS.find(mission_id)
 		game.call("select_mission",mission_id)
 		game.call("store_event_review",mission_id,_record(mission_id))

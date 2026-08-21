@@ -267,12 +267,13 @@ func _check_timed_respawn_flow() -> void:
 	assert(int(main.get("_mission_deaths"))==1,"revival was not counted")
 	assert(float(main.get("_mission_elapsed"))>=40.0,"death reset mission timer")
 	assert(not bool(main.get("_mission_ended")),"death incorrectly ended mission before timeout")
-	# 普通正式关超时判负并自然结算，但不进入事件责任归因或状态量表。
+	# 第一段正常正式飞行也必须在自然结算后进入本关责任分配；它是正式测量，不能静默跳过。
 	main.call("_begin_mission_end","超时未完成",false)
 	await create_timer(6.0,true,false,true).timeout
 	assert(bool(main.get("_mission_ended")),"timeout did not end mission")
 	assert(not bool(game.get("ship_alive")),"terminal timeout explosion incorrectly respawned")
-	assert(root.find_children("MissionAttribution_*","",true,false).is_empty(),"normal level incorrectly opened event attribution")
+	assert(root.find_children("MissionAttribution_*","",true,false).size()==2,
+		"first formal flight did not open two mission attribution questionnaires")
 	assert(root.find_children("SurveyPanel_*","",true,false).is_empty(),"normal level incorrectly opened post-event state surveys")
 	main.queue_free()
 	await process_frame

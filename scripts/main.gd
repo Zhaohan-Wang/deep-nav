@@ -1451,7 +1451,7 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 	await _show_result_flow(outcome,success,summary)
 	if Game.selected_mission_id == "practice":
 		_show_surveys(outcome,summary)
-	elif Game.selected_mission_id in ["level_2","level_3"]:
+	elif Game.selected_mission_id in ["level_1","level_2","level_3"]:
 		var review := _required_review()
 		if review.is_empty():
 			_show_mission_attribution_surveys()
@@ -1461,11 +1461,6 @@ func _begin_mission_end(outcome: String,success: bool) -> void:
 				"mission_id":Game.selected_mission_id,
 			})
 			_show_experiment_review(str(review.message))
-	else:
-		# 正常正式关只提供行为基线，不做事件责任归因或状态问卷。
-		_dismiss_result_panels()
-		await _complete_unmeasured_mission()
-		return
 	# 下一层先盖住飞行总结，随后再移除总结；任何一帧都不会露出驾驶舱。
 	await get_tree().process_frame
 	_dismiss_result_panels()
@@ -1597,17 +1592,6 @@ func _on_mission_attribution_submitted(role: String,answer: Dictionary) -> void:
 
 func _complete_mission_questionnaires() -> void:
 	# 每人连续完成责任分配和即时状态信任；这里只设置唯一一次双人等待。
-	Game.mark_current_mission_played(_mission_outcome)
-	var sequence_finished := Game.active_mission_id().is_empty()
-	await get_tree().create_timer(0.8).timeout
-	if sequence_finished:
-		ExperimentLog.close_session()
-		get_tree().change_scene_to_file("res://scenes/thank_you.tscn")
-	else:
-		get_tree().change_scene_to_file("res://scenes/level_select.tscn")
-
-
-func _complete_unmeasured_mission() -> void:
 	Game.mark_current_mission_played(_mission_outcome)
 	var sequence_finished := Game.active_mission_id().is_empty()
 	await get_tree().create_timer(0.8).timeout
