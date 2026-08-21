@@ -84,10 +84,17 @@ func _check_allocator_for_all_four() -> void:
 		assert(text.contains("我自己（领航员）") and text.contains("我的搭档（驾驶员）"),"%s role labels were wrong" % mission_id)
 		assert(text.contains("领航系统") and text.contains("飞船控制系统") and text.contains("外部环境"),"%s responsibility labels were wrong" % mission_id)
 		assert(text.contains("事件前后航迹") and panel.find_child("MissionFlightTrail",true,false)!=null,"%s flight trail review was missing" % mission_id)
+		for legend_name: String in ["CurrentTrailLegend","FailedTrailLegend","CollisionLegend","TargetEventLegend"]:
+			assert(panel.find_child(legend_name,true,false)!=null,"%s missing visual legend icon %s" % [mission_id,legend_name])
+		assert(not text.contains("青航迹") and not text.contains("灰坠毁") and not text.contains("红碰撞"),
+			"%s still explained trail marks only with color words" % mission_id)
 		if mission_id == "level_2":
 			var trail_review := panel.find_child("MissionFlightTrail",true,false)
 			assert((trail_review.get("_target_positions") as PackedVector2Array).size()==1,"level 3 did not draw exactly one target event")
-			assert((trail_review.get("_fixed_bounds") as Rect2).is_equal_approx(Rect2(-480,-120,960,240)),"level 3 trail did not use a stable full-mission frame")
+			var content_bounds := trail_review.call("_content_bounds") as Rect2
+			assert(content_bounds.size.x<300.0,"participant trail still used the full mission boundary instead of observed behavior")
+			assert(trail_review.custom_minimum_size.x>=420.0 and trail_review.custom_minimum_size.y>=100.0,
+				"participant trail did not expand to the available review area")
 		if mission_id == "level_2":
 			assert(text.contains("你是否注意到航点位置发生了偏移"),"level 3 awareness question was not event-specific")
 			assert(not text.contains("领航员放置航点后"),"level 3 review foregrounded an actor before responsibility allocation")

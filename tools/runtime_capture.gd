@@ -240,15 +240,15 @@ func _capture() -> void:
 	if not _save_capture(OUT_SUMMARY): quit(1); return
 	for result: Control in result_panels: result.free()
 	for i: int in range(4): await process_frame
-	nav_view.call("show_experiment_notice","检测到航点位置偏移，原因未知。")
-	pilot_view.call("show_experiment_notice","检测到航点位置偏移，原因未知。")
+	nav_view.call("show_experiment_notice","检测到飞船横向偏移，原因未知。")
+	pilot_view.call("show_experiment_notice","检测到飞船横向偏移，原因未知。")
 	for i: int in range(3): await process_frame
 	var participant_views := level3_scene.call("_capture_participant_views",false) as Dictionary
 	var attribution_record := {
 		"event_id":"runtime-level3-review","event_type":"mission_responsibility",
 		"mission_id":"level_3","mission_label":"正式任务 03","elapsed":146.8,
 		"outcome":"完成","success":true,"attempt_number":1,
-		"target_event_type":"waypoint_drift","target_event_exposed":true,"target_event_pulse_count":1,
+		"target_event_type":"ship_shear","target_event_exposed":true,"target_event_pulse_count":1,
 		"capture_kind":"target_peak","views":participant_views,
 		"flight_trail":PackedVector2Array([
 			Vector2(5,8),Vector2(42,2),Vector2(75,5),Vector2(108,-4),Vector2(140,-18),

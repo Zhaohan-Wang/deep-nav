@@ -3,6 +3,7 @@ extends Control
 ## 核心异常关结束后填写：先做异常觉察检查，再做 100 分责任预算分配。
 
 const MissionFlightTrailScript = preload("res://scripts/ui/mission_flight_trail.gd")
+const MissionTrailLegendIconScript = preload("res://scripts/ui/mission_trail_legend_icon.gd")
 
 signal submitted(display_role: String, answer: Dictionary)
 
@@ -162,8 +163,10 @@ func _prepare_item_order() -> void:
 func _review_column() -> Control:
 	var column := VBoxContainer.new()
 	column.name = "MissionFlightReview"
-	column.custom_minimum_size = Vector2(390,0)
+	column.custom_minimum_size = Vector2(430,0)
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.size_flags_stretch_ratio = 1.08
 	column.add_theme_constant_override("separation",6)
 	if _is_target_event_mission() and _mission_image() != null:
 		column.add_child(_screenshot_review_card())
@@ -174,7 +177,7 @@ func _review_column() -> Control:
 func _trail_review_card() -> Control:
 	var card := PanelContainer.new()
 	card.name = "MissionTrailCard"
-	card.custom_minimum_size = Vector2(0,70)
+	card.custom_minimum_size = Vector2(0,130)
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	card.add_theme_stylebox_override("panel",_small_box(Color("07111e"),Color("29435a"),1))
 	var col := VBoxContainer.new()
@@ -185,13 +188,35 @@ func _trail_review_card() -> Control:
 	var trail_title := AppStyle.label("事件前后航迹",12,AppStyle.TEXT)
 	trail_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(trail_title)
-	heading.add_child(AppStyle.label("青航迹 · 灰坠毁 · 红碰撞 · 琥珀异常",8,AppStyle.MUTED))
+	var legend := HBoxContainer.new()
+	legend.name = "MissionTrailLegend"
+	legend.add_theme_constant_override("separation",8)
+	col.add_child(legend)
+	for entry: Dictionary in [
+		{"kind":MissionTrailLegendIconScript.Kind.CURRENT_TRAIL,"label":"本次航迹","name":"CurrentTrailLegend"},
+		{"kind":MissionTrailLegendIconScript.Kind.FAILED_TRAIL,"label":"撞毁航段","name":"FailedTrailLegend"},
+		{"kind":MissionTrailLegendIconScript.Kind.COLLISION,"label":"碰撞点","name":"CollisionLegend"},
+		{"kind":MissionTrailLegendIconScript.Kind.TARGET_EVENT,"label":"异常位置","name":"TargetEventLegend"},
+	]:
+		legend.add_child(_trail_legend_item(int(entry.kind),str(entry.label),str(entry.name)))
 	var trail: Control = MissionFlightTrailScript.new()
 	trail.name = "MissionFlightTrail"
 	col.add_child(trail)
 	trail.call("setup",_record)
-	trail.custom_minimum_size = Vector2(370,58)
+	trail.custom_minimum_size = Vector2(420,100)
 	return card
+
+
+func _trail_legend_item(kind: int,label_text: String,node_name: String) -> Control:
+	var item := HBoxContainer.new()
+	item.name = node_name
+	item.add_theme_constant_override("separation",3)
+	var icon: Control = MissionTrailLegendIconScript.new()
+	icon.name = "%sIcon" % node_name
+	icon.call("setup",kind)
+	item.add_child(icon)
+	item.add_child(AppStyle.label(label_text,9,AppStyle.MUTED))
+	return item
 
 
 func _screenshot_review_card() -> Control:

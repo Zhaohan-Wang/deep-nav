@@ -1,10 +1,10 @@
 class_name MissionFlightTrail
 extends Control
-## 整关共同航迹：当前航段实线、坠毁航段虚线、碰撞点红叉、目标异常琥珀菱形。
+## 事件前后真实航迹：当前航段实线、撞毁航段虚线、碰撞点冲击标记、目标异常琥珀菱形。
 
 const GRID := Color(0.20,0.35,0.45,0.16)
 const CURRENT := Color(0.33,0.89,0.93,0.92)
-const FAILED := Color(0.62,0.73,0.79,0.42)
+const FAILED := Color(0.86,0.45,0.48,0.82)
 const HIT := Color(0.96,0.32,0.34,0.95)
 const EVENT := Color(1.0,0.72,0.28,1.0)
 const START := Color(0.33,0.89,0.93,0.95)
@@ -29,8 +29,9 @@ func setup(record: Dictionary) -> void:
 	if _target_positions.is_empty() and record.get("target_event_position",null) != null:
 		_target_positions.append(Vector2(record.get("target_event_position")))
 	_fixed_bounds = record.get("flight_world_bounds",Rect2()) as Rect2
-	custom_minimum_size = Vector2(306.0,112.0)
+	custom_minimum_size = Vector2(420.0,100.0)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	queue_redraw()
@@ -45,39 +46,51 @@ func _draw() -> void:
 	var bounds := _content_bounds()
 	if bounds.size.x <= 0.0 or bounds.size.y <= 0.0:
 		return
-	var pad := 12.0
+	var pad := 18.0
 	var scale := minf((size.x-pad*2.0)/bounds.size.x,(size.y-pad*2.0)/bounds.size.y)
 	var offset := (size-bounds.size*scale)*0.5-bounds.position*scale
 	for segment: Variant in _failed_trails:
 		var points := segment as PackedVector2Array
 		if points.size() >= 2:
-			_draw_dashed(_to_screen(points,offset,scale),FAILED,2.4,6.0,5.0)
+			var failed_screen := _to_screen(points,offset,scale)
+			_draw_dashed(failed_screen,FAILED,3.0,7.0,5.0)
+			_draw_crash_marker(failed_screen[failed_screen.size()-1])
 	if _trail.size() >= 2:
-		draw_polyline(_to_screen(_trail,offset,scale),CURRENT,3.2,true)
+		draw_polyline(_to_screen(_trail,offset,scale),CURRENT,4.0,true)
 	for point: Vector2 in _hits:
 		var hit := offset+point*scale
-		draw_line(hit-Vector2(3.5,3.5),hit+Vector2(3.5,3.5),HIT,2.0,true)
-		draw_line(hit+Vector2(-3.5,3.5),hit+Vector2(3.5,-3.5),HIT,2.0,true)
+		_draw_collision_marker(hit)
 	var start := offset+_start*scale
-	draw_circle(start,3.5,START)
+	if _point_visible(start,pad):
+		draw_circle(start,4.5,START)
 	var goal := offset+_goal*scale
-	draw_circle(goal,5.0,GOAL,false,2.0,true)
+	# 未实际抵达的远端终点不再参与取景或强行显示，避免把事故前后航迹压成一小段。
+	if _point_visible(goal,pad):
+		draw_circle(goal,6.0,GOAL,false,2.4,true)
 	for target: Vector2 in _target_positions:
 		var event := offset+target*scale
+		draw_circle(event,10.0,Color(EVENT,0.18),false,2.0,true)
 		draw_colored_polygon(PackedVector2Array([
-			event+Vector2(0,-6),event+Vector2(6,0),event+Vector2(0,6),event+Vector2(-6,0),
+			event+Vector2(0,-7),event+Vector2(7,0),event+Vector2(0,7),event+Vector2(-7,0),
 		]),EVENT)
+		draw_polyline(PackedVector2Array([
+			event+Vector2(0,-7),event+Vector2(7,0),event+Vector2(0,7),
+			event+Vector2(-7,0),event+Vector2(0,-7),
+		]),Color("08131d"),1.7,true)
 
 
 func _content_bounds() -> Rect2:
-	if _fixed_bounds.size.x > 0.0 and _fixed_bounds.size.y > 0.0:
-		return _fixed_bounds
-	var points := PackedVector2Array([_start,_goal])
+	# 参与者页按本次真实出现过的内容取景。_fixed_bounds 仍保留在记录中供研究审核图使用，
+	# 但不能拿整张关卡边界压缩一次只走到中段的事故航迹。
+	var points := PackedVector2Array()
 	points.append_array(_trail)
 	points.append_array(_hits)
 	for segment: Variant in _failed_trails:
 		points.append_array(segment as PackedVector2Array)
 	points.append_array(_target_positions)
+	if points.is_empty():
+		points.append(_start)
+		points.append(_goal)
 	if points.is_empty():
 		return Rect2()
 	var min_point := points[0]
@@ -85,9 +98,31 @@ func _content_bounds() -> Rect2:
 	for point: Vector2 in points:
 		min_point.x=minf(min_point.x,point.x); min_point.y=minf(min_point.y,point.y)
 		max_point.x=maxf(max_point.x,point.x); max_point.y=maxf(max_point.y,point.y)
-	var bounds := Rect2(min_point,max_point-min_point).grow(3.0)
+	var bounds := Rect2(min_point,max_point-min_point).grow(4.0)
 	bounds.size.x=maxf(bounds.size.x,1.0); bounds.size.y=maxf(bounds.size.y,1.0)
 	return bounds
+
+
+func _point_visible(point: Vector2,pad: float) -> bool:
+	return Rect2(Vector2(pad,pad),size-Vector2.ONE*pad*2.0).has_point(point)
+
+
+func _draw_collision_marker(center: Vector2) -> void:
+	draw_circle(center,8.0,Color(HIT,0.20))
+	draw_circle(center,7.0,HIT,false,2.0,true)
+	draw_line(center-Vector2(4.5,4.5),center+Vector2(4.5,4.5),Color.WHITE,2.1,true)
+	draw_line(center+Vector2(-4.5,4.5),center+Vector2(4.5,-4.5),Color.WHITE,2.1,true)
+	for direction: Vector2 in [Vector2.UP,Vector2.RIGHT,Vector2.DOWN,Vector2.LEFT]:
+		draw_line(center+direction*7.0,center+direction*10.5,HIT,1.7,true)
+
+
+func _draw_crash_marker(center: Vector2) -> void:
+	draw_circle(center,8.5,Color(FAILED,0.25))
+	draw_circle(center,6.5,FAILED)
+	for direction: Vector2 in [Vector2.UP,Vector2.RIGHT,Vector2.DOWN,Vector2.LEFT]:
+		draw_line(center+direction*5.5,center+direction*10.0,FAILED,2.0,true)
+	draw_line(center-Vector2(3.8,3.8),center+Vector2(3.8,3.8),Color("07111e"),2.0,true)
+	draw_line(center+Vector2(-3.8,3.8),center+Vector2(3.8,-3.8),Color("07111e"),2.0,true)
 
 
 func _to_screen(raw: PackedVector2Array,offset: Vector2,scale: float) -> PackedVector2Array:
